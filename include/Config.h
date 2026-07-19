@@ -74,7 +74,7 @@ constexpr int BMS_ZERO_AFTER_CONSECUTIVE_FAILURES = 3;
 // previewed and iterated on without real BMS hardware attached. This is only the seed default for
 // RuntimeSettings::simulateBmsData() - once toggled via the System tab (display or web), the NVS
 // value takes over and this constant is no longer consulted.
-constexpr bool SIMULATE_BMS_DATA = true;
+constexpr bool SIMULATE_BMS_DATA = false;
 constexpr const char* RUNTIME_SETTINGS_NVS_NAMESPACE = "pacebms_rtset";
 
 constexpr const char* MQTT_BASE_TOPIC = "pacebms";
