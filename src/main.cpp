@@ -19,11 +19,18 @@
 
 namespace {
 HardwareSerial& bmsSerial = Serial2;
+HardwareSerial& modbusSerial = Serial1;
 }  // namespace
 
 void setup() {
     Serial.begin(115200);
     bmsSerial.begin(BMS_UART_BAUD, SERIAL_8N1, BMS_UART_RX_PIN, BMS_UART_TX_PIN);
+
+    // Modbus/RS485 UART + DE/RE control pin - initialized unconditionally (cheap, harmless if the
+    // Modbus transport is never selected via RuntimeSettings::useModbus()).
+    modbusSerial.begin(MODBUS_UART_BAUD, SERIAL_8N1, MODBUS_UART_RX_PIN, MODBUS_UART_TX_PIN);
+    pinMode(MODBUS_DE_RE_PIN, OUTPUT);
+    digitalWrite(MODBUS_DE_RE_PIN, LOW);  // receive mode by default
 
     CalibrationManager::instance().begin();
     CredentialsManager::instance().begin();

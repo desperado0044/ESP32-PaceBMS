@@ -6,10 +6,15 @@
 > bisher **nicht gegen ein echtes PACE-BMS verifiziert** (siehe „Stand / Umfang"
 > unten) - vor produktivem Einsatz an einem echten Akkupack selbst prüfen.
 
-ESP32-Firmware zum Auslesen eines PACE-basierten BMS (RS232) mit Web-Oberfläche
-und MQTT/Home-Assistant-Anbindung. Das ASCII-Hex-Protokoll (Framing, Checksum,
-Kommandos) wurde von [Tertiush/bmspace](https://github.com/Tertiush/bmspace)
-(Python) nach C++ portiert.
+ESP32-Firmware zum Auslesen eines PACE-basierten BMS mit Web-Oberfläche und
+MQTT/Home-Assistant-Anbindung. Zwei wählbare Anschlussarten (Umschalter im
+Konfiguration-Tab):
+
+- **RS232** (Standard) — das ASCII-Hex-Protokoll, portiert von
+  [Tertiush/bmspace](https://github.com/Tertiush/bmspace) (Python).
+- **Modbus RTU / RS485** — nach dem offiziellen Modbus-Registerdokument von
+  [syssi/esphome-pace-bms](https://github.com/syssi/esphome-pace-bms) (siehe
+  „Modbus RTU / RS485" unten für Einschränkungen).
 
 ## Stand / Umfang
 
@@ -26,14 +31,15 @@ Kommandos) wurde von [Tertiush/bmspace](https://github.com/Tertiush/bmspace)
 - MQTT mit **Home-Assistant-Autoerkennung** (MQTT Discovery) — Sensoren erscheinen
   automatisch in Home Assistant, keine manuelle YAML-Konfiguration nötig (siehe
   „MQTT / Home Assistant" unten).
+- **Zwei BMS-Anschlussarten** (RS232 oder Modbus RTU/RS485), umschaltbar über den
+  Konfiguration-Tab, ohne Neu-Flashen — siehe „Modbus RTU / RS485" unten.
 
-## Kompatible Geräte (ungetestet, aber möglich)
+## Kompatible Geräte (ungetestet)
 
 Folgende Geräte laufen laut [syssi/esphome-pace-bms](https://github.com/syssi/esphome-pace-bms)
-mit einem PACE-BMS-Innenleben — **allerdings über dessen RS485/Modbus-Protokoll**,
-nicht das hier implementierte RS232-ASCII-Protokoll. Ob das RS232-Port bei diesen
-Geräten dasselbe Protokoll spricht wie unser Referenzprojekt
-([Tertiush/bmspace](https://github.com/Tertiush/bmspace)), ist **nicht verifiziert**:
+mit einem PACE-BMS-Innenleben über dessen RS485/Modbus-Protokoll — mit dem hier
+neu eingebauten Modbus-Modus (siehe unten) also potenziell direkt nutzbar, auch
+wenn wir das an keinem dieser Geräte selbst getestet haben:
 
 - Katbatt 6.4kWh LiFePO4 (PACE BMS P16S200A)
 - Gobel Power GP-SR1-LF280-RN150 51.2V 280Ah (PACE BMS S16A150)
@@ -81,6 +87,25 @@ UART-Parameter: **9600 Baud, 8N1** (siehe `include/Config.h`).
 
 Die genaue RJ11-Belegung kann je nach Marke/Modell abweichen — vor dem
 Anschließen mit einem Multimeter/Oszilloskop verifizieren.
+
+### Modbus RTU / RS485 (alternativer Anschluss, UART1)
+
+Anderer physischer Port am BMS als RS232 (siehe „Modbus RTU / RS485" weiter
+unten für Protokoll-Details/Einschränkungen). Nutzt ein MAX485-Modul mit
+gemeinsamer DE/RE-Steuerleitung (ein GPIO für Sende-/Empfangsumschaltung, üblich
+bei günstigen Modulen):
+
+| ESP32 (UART1) | MAX485-Modul |
+|---------------|--------------|
+| GPIO26 (TX)   | DI           |
+| GPIO25 (RX)   | RO           |
+| GPIO13        | DE + RE (verbunden) |
+| 3.3V          | VCC          |
+| GND           | GND          |
+
+Modul-Pins `A`/`B` zum RS485-Port des BMS (RJ45, siehe
+[syssi/esphome-pace-bms](https://github.com/syssi/esphome-pace-bms) für
+Pinbelegung/Farbcode). UART-Parameter: **9600 Baud, 8N1**.
 
 ### Display + Touch (TFT_eSPI + XPT2046)
 
@@ -150,6 +175,30 @@ Nur die Kopfzeile wird sekündlich aktualisiert (kleiner, günstiger Redraw); de
 Rest der Seite zeichnet komplett nur neu, wenn sich wirklich etwas ändert (neue
 BMS-Daten, Tab-Wechsel, Pack-Wechsel, Kalibrierung) — ein voller Redraw im
 Sekundentakt hätte sichtbar geblitzt.
+
+## Modbus RTU / RS485
+
+Alternative zum RS232-Anschluss, umschaltbar im **Konfiguration**-Tab (Web) —
+Auswahl speichern startet neu, wie bei WLAN/MQTT-Änderungen. Implementiert
+nach dem Registerdokument
+[PACE-BMS-Modbus-Protocol-for-RS485-V1.3-20170627.pdf](https://github.com/syssi/esphome-pace-bms/blob/main/docs/PACE-BMS-Modbus-Protocol-for-RS485-V1.3-20170627.pdf)
+(`syssi/esphome-pace-bms`). Ein einzelner Read-Holding-Registers-Request
+(Register 0-36) liefert Strom/Spannung/SOC/SOH/Kapazitäten/Zyklen, Warn-/
+Schutz-/Status-Flags, alle 16 Zellspannungen sowie 6 Temperatursensoren (4×
+Zelle, MOSFET, Umgebung) in einem Rutsch — Version/Seriennummer werden über
+Modbus nicht gelesen.
+
+**Einschränkungen gegenüber RS232:**
+- Nur **ein Pack** — das Modbus-Registerschema kennt kein Mehrpack-Konzept wie
+  der RS232-Befehl `0x42` ("alle Packs").
+- Keine Entsprechung für "Vollgeladen", "Pack Indicate" und "Netzteil/AC-In" im
+  Status-Tab — diese Felder gibt es im Modbus-Registersatz schlicht nicht,
+  bleiben also leer/aus.
+- Version/Seriennummer werden nicht ausgelesen (Anzeige zeigt "Modbus" statt
+  einer echten Versionsnummer).
+
+Bisher **nicht an echter Hardware getestet** — nur der Protokoll-Code selbst
+(CRC16, Framing) wurde gegen die PDF-Spezifikation implementiert.
 
 ## Pack-Erkennung & Verhalten bei Trennung
 
@@ -284,7 +333,13 @@ User/Passwort werden wie oben beschrieben eingerichtet, nicht im Code.
   Checksum/LCHKSUM, Antwort-Parsing (protokoll-, nicht hardwarespezifisch).
 - `include/PaceBmsClient.h`, `src/PaceBmsClient.cpp` — Kommandos (Version,
   Seriennummer, Analogdaten, Kapazität, Warn-Info) über eine `HardwareSerial`.
-- `include/BmsData.h` — Datenstrukturen für den zuletzt gelesenen Zustand.
+- `include/ModbusRtuProtocol.h`, `src/ModbusRtuProtocol.cpp` — Modbus-RTU-
+  Framing (CRC16, Read-Holding-Registers), analog zu `PaceBmsProtocol`.
+- `include/PaceModbusClient.h`, `src/PaceModbusClient.cpp` — liest das
+  PACE-Modbus-Registerschema (siehe „Modbus RTU / RS485" oben) in dieselben
+  `BmsData.h`-Strukturen wie `PaceBmsClient`.
+- `include/BmsData.h` — Datenstrukturen für den zuletzt gelesenen Zustand,
+  protokollunabhängig (RS232 und Modbus füllen dieselben Structs).
 - `include/SnapshotStore.h`, `src/SnapshotStore.cpp` — Mutex-geschützter
   Austausch des Snapshots zwischen Core 0 und Core 1 (siehe Architektur oben).
 - `include/NetworkTask.h`, `src/NetworkTask.cpp` — FreeRTOS-Task (Core 0):
@@ -303,6 +358,8 @@ User/Passwort werden wie oben beschrieben eingerichtet, nicht im Code.
   (Tap + horizontales Wischen), Touch-Handling.
 - `include/SimulatedBms.h`, `src/SimulatedBms.cpp` — Fake-Datengenerator für den
   Simulationsmodus (siehe oben).
+- `include/RuntimeSettings.h`, `src/RuntimeSettings.cpp` — NVS-persistierte
+  Laufzeit-Einstellungen (Simulationsmodus, BMS-Anschlussart RS232/Modbus).
 - `include/FactoryReset.h`, `src/FactoryReset.cpp` — Werksreset über den
   BOOT/FLASH-Button (siehe oben).
 - `src/main.cpp` — Core-1-Einstiegspunkt: nur Display-Setup + Display-Loop.

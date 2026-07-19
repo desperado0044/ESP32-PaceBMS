@@ -183,6 +183,7 @@ async function refreshSystem() {
           <div class="stat"><div class="label">Freier Update-Speicher</div><div class="value">${Math.round(s.freeSketchSpaceBytes/1024)} KB</div></div>
           <div class="stat"><div class="label">Build</div><div class="value">${s.buildTime}</div></div>
           <div class="stat"><div class="label">Letzter Neustart</div><div class="value">${s.resetReason}</div></div>
+          <div class="stat"><div class="label">BMS-Anschluss</div><div class="value">${s.useModbus ? 'Modbus RTU' : 'RS232'}</div></div>
         </div>
       </div>
       <div class="pack">
@@ -272,6 +273,20 @@ const char kConfigHtml[] PROGMEM = R"HTML(
       <label>User<input type="text" name="user" value="%MQTT_USER%"></label>
       <label>Passwort (leer lassen = unveraendert)<input type="password" name="pass" placeholder="unveraendert"></label>
       <button type="submit">MQTT speichern &amp; neu starten</button>
+    </fieldset>
+  </form>
+  <form method="POST" action="/api/config/protocol">
+    <fieldset>
+      <legend>BMS-Anschluss</legend>
+      <label style="display:flex;align-items:center;gap:0.5rem;">
+        <input type="radio" name="protocol" value="rs232" %PROTOCOL_RS232_CHECKED% style="width:auto;">
+        RS232 (ASCII-Protokoll)
+      </label>
+      <label style="display:flex;align-items:center;gap:0.5rem;">
+        <input type="radio" name="protocol" value="modbus" %PROTOCOL_MODBUS_CHECKED% style="width:auto;">
+        Modbus RTU / RS485
+      </label>
+      <button type="submit">Anschluss speichern &amp; neu starten</button>
     </fieldset>
   </form>
   <p><a class="back" href="/">&larr; Zurueck zum Dashboard</a></p>
@@ -379,6 +394,7 @@ String buildSystemJson() {
     doc["ip"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
     doc["mac"] = WiFi.macAddress();
     doc["simulateBmsData"] = RuntimeSettings::simulateBmsData();
+    doc["useModbus"] = RuntimeSettings::useModbus();
 
     String out;
     serializeJson(doc, out);
@@ -405,7 +421,19 @@ void handleConfigPage(AsyncWebServerRequest* request) {
     html.replace("%MQTT_HOST%", CredentialsManager::instance().getMqttHost());
     html.replace("%MQTT_PORT%", String(CredentialsManager::instance().getMqttPort()));
     html.replace("%MQTT_USER%", CredentialsManager::instance().getMqttUser());
+    bool modbus = RuntimeSettings::useModbus();
+    html.replace("%PROTOCOL_RS232_CHECKED%", modbus ? "" : "checked");
+    html.replace("%PROTOCOL_MODBUS_CHECKED%", modbus ? "checked" : "");
     request->send(200, "text/html", html);
+}
+
+void handleSaveProtocol(AsyncWebServerRequest* request) {
+    String protocol = paramOr(request, "protocol", "rs232");
+    RuntimeSettings::setUseModbus(protocol == "modbus");
+
+    request->send(200, "text/html", kConfigSavedHtml);
+    delay(500);
+    ESP.restart();
 }
 
 void handleSaveWifi(AsyncWebServerRequest* request) {
@@ -453,6 +481,7 @@ void begin() {
     server.on("/konfiguration", HTTP_GET, handleConfigPage);
     server.on("/api/config/wifi", HTTP_POST, handleSaveWifi);
     server.on("/api/config/mqtt", HTTP_POST, handleSaveMqtt);
+    server.on("/api/config/protocol", HTTP_POST, handleSaveProtocol);
 
     ElegantOTA.begin(&server);
     ElegantOTA.setAuth(OTA_HOSTNAME, OTA_PASSWORD);

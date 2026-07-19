@@ -12,4 +12,9 @@ bool simulateBmsData();
 // once at task start, same pattern as WiFi/MQTT credential changes).
 void setSimulateBmsData(bool value);
 
+// Which BMS transport NetworkTask polls: false = RS232/ASCII (PaceBmsClient, the default), true =
+// Modbus RTU/RS485 (PaceModbusClient). Same "persist + caller reboots" pattern as above.
+bool useModbus();
+void setUseModbus(bool value);
+
 }  // namespace RuntimeSettings

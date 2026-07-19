@@ -9,6 +9,19 @@ constexpr unsigned long BMS_UART_BAUD = 9600;
 constexpr unsigned long BMS_RESPONSE_TIMEOUT_MS = 500;
 
 // ---------------------------------------------------------------------------------------------
+// Alternative transport: PACE's Modbus RTU protocol over RS485 (a different physical port on the
+// BMS than the RS232 one above - see README). Uses ESP32's third hardware UART (UART1; UART0 is
+// Serial/USB-debug, UART2 is the RS232 BMS link) through a MAX485-style transceiver. This module's
+// DE and RE pins are tied together to one GPIO (common on cheap breakout boards) - HIGH to
+// transmit, LOW to receive, since half-duplex RS485 never does both at once anyway.
+constexpr int MODBUS_UART_TX_PIN = 26;
+constexpr int MODBUS_UART_RX_PIN = 25;
+constexpr int MODBUS_DE_RE_PIN = 13;
+constexpr unsigned long MODBUS_UART_BAUD = 9600;
+constexpr unsigned long MODBUS_RESPONSE_TIMEOUT_MS = 500;
+constexpr uint8_t MODBUS_SLAVE_ADDRESS = 0x01;
+
+// ---------------------------------------------------------------------------------------------
 // Display (TFT_eSPI, ILI9341, HSPI) + Touch (XPT2046, VSPI) - same physical rig and pin mapping
 // as the Haustuerklingel project (see that repo's src/config.h / platformio.ini for the full
 // rationale). TFT_MOSI/SCLK/CS/DC/RST are set via platformio.ini build_flags, duplicated here
