@@ -20,6 +20,13 @@ bool discoveryPublished = false;
 unsigned long lastReconnectAttemptMs = 0;
 constexpr unsigned long kReconnectIntervalMs = 5000;
 
+// Highest cell/temp count ever seen per pack. When a pack's cellCount/tempCount drops (pack
+// disconnected, zeroed by NetworkTask), the per-index topics below it must still be published as
+// 0 - otherwise those specific retained MQTT values would be stuck at their last real reading
+// forever, even though the pack-level stats correctly show 0.
+uint8_t maxCellsSeen[PACE_MAX_PACKS] = {0};
+uint8_t maxTempsSeen[PACE_MAX_PACKS] = {0};
+
 String availabilityTopic() { return String(MQTT_BASE_TOPIC) + "/availability"; }
 
 String topic(const String& suffix) { return String(MQTT_BASE_TOPIC) + "/" + suffix; }
@@ -232,11 +239,15 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
         const PacePackAnalog& pack = snapshot.packs[p - 1];
         const PacePackWarn& warn = snapshot.warn[p - 1];
 
-        for (uint8_t i = 0; i < pack.cellCount; i++) {
-            publish(packPrefix + "/v_cells/cell_" + String(i + 1), (long)pack.cellMillivolts[i]);
+        if (pack.cellCount > maxCellsSeen[p - 1]) maxCellsSeen[p - 1] = pack.cellCount;
+        for (uint8_t i = 0; i < maxCellsSeen[p - 1]; i++) {
+            long mv = i < pack.cellCount ? (long)pack.cellMillivolts[i] : 0;
+            publish(packPrefix + "/v_cells/cell_" + String(i + 1), mv);
         }
-        for (uint8_t i = 0; i < pack.tempCount; i++) {
-            publish(packPrefix + "/temps/temp_" + String(i + 1), pack.temperaturesC[i]);
+        if (pack.tempCount > maxTempsSeen[p - 1]) maxTempsSeen[p - 1] = pack.tempCount;
+        for (uint8_t i = 0; i < maxTempsSeen[p - 1]; i++) {
+            float t = i < pack.tempCount ? pack.temperaturesC[i] : 0;
+            publish(packPrefix + "/temps/temp_" + String(i + 1), t);
         }
         publish(packPrefix + "/cells_max_diff_calc", (long)pack.cellMaxDiffMv);
         publish(packPrefix + "/i_pack", pack.packCurrentA);

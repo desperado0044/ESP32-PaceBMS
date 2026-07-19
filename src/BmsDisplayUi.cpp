@@ -2,6 +2,7 @@
 #include "DisplayHardware.h"
 #include "TouchCalibration.h"
 #include "WifiProvisioning.h"
+#include "RuntimeSettings.h"
 #include "Config.h"
 #include <WiFi.h>
 #include <math.h>
@@ -60,6 +61,14 @@ bool swipeTracking = false;
 bool swipeConsumed = false;
 int16_t swipeStartX = 0;
 int16_t swipeStartY = 0;
+
+// Bounds of the tappable "Simulation an/aus" row on the System tab, set each time it's drawn.
+int simRowY = 0;
+int simRowH = 0;
+
+// Bounds of the "Neustart" button on the System tab - placed top-right, away from the Simulation
+// row at the bottom, so the two touch targets can't be mixed up.
+int rebootBtnX = 0, rebootBtnY = 0, rebootBtnW = 0, rebootBtnH = 0;
 
 // ---- low-level drawing helpers -----------------------------------------------------------
 
@@ -122,16 +131,16 @@ void drawCurrentArrow(int cx, int cy, float currentA) {
 }
 
 void drawStatRow(int x, int y, int w, int h, const char* label, const String& value,
-                  bool divider) {
+                  bool divider, uint8_t valueFont = 4) {
     tft.setTextDatum(ML_DATUM);
     tft.setTextFont(2);
     tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
     tft.drawString(label, x, y + h / 2 - 8);
 
     tft.setTextDatum(MR_DATUM);
-    tft.setTextFont(4);
+    tft.setTextFont(valueFont);
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    tft.drawString(value, x + w, y + h / 2 + 2);
+    tft.drawString(value, x + w, y + h / 2 + (valueFont >= 4 ? 2 : 0));
 
     if (divider) tft.drawFastHLine(x, y + h - 1, w, COLOR_DIVIDER);
     tft.setTextDatum(TL_DATUM);
@@ -485,19 +494,32 @@ void drawSystemInfo() {
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.drawString("System", SCREEN_WIDTH / 2, CONTENT_TOP + 6);
 
+    // Top-right, well away from the "Simulation" row at the bottom of this page - two distinct
+    // touch targets that are easy to tell apart, so one can't be hit by accident going for the other.
+    rebootBtnW = 64;
+    rebootBtnH = 20;
+    rebootBtnX = SCREEN_WIDTH - rebootBtnW - 8;
+    rebootBtnY = CONTENT_TOP + 2;
+    tft.fillRoundRect(rebootBtnX, rebootBtnY, rebootBtnW, rebootBtnH, 4, COLOR_WARN_DIM);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(1);
+    tft.setTextColor(COLOR_WARN, COLOR_WARN_DIM);
+    tft.drawString("Neustart", rebootBtnX + rebootBtnW / 2, rebootBtnY + rebootBtnH / 2);
+    tft.setTextDatum(TC_DATUM);
+
     unsigned long upSec = millis() / 1000;
     unsigned long upH = upSec / 3600;
     unsigned long upM = (upSec % 3600) / 60;
     unsigned long upS = upSec % 60;
 
     int x = 12;
-    int y = CONTENT_TOP + 38;
+    int y = CONTENT_TOP + 34;
     int w = SCREEN_WIDTH - 24;
-    int rowH = 24;
+    int rowH = 20;
     char buf[32];
 
     snprintf(buf, sizeof(buf), "%luh %02lum %02lus", upH, upM, upS);
-    drawStatRow(x, y, w, rowH, "Laufzeit", buf, true);
+    drawStatRow(x, y, w, rowH, "Laufzeit", buf, true, 2);
     y += rowH;
 
     if (WiFi.status() == WL_CONNECTED) {
@@ -505,23 +527,31 @@ void drawSystemInfo() {
     } else {
         snprintf(buf, sizeof(buf), "--");
     }
-    drawStatRow(x, y, w, rowH, "WLAN-Signal", buf, true);
+    drawStatRow(x, y, w, rowH, "WLAN-Signal", buf, true, 2);
     y += rowH;
 
     snprintf(buf, sizeof(buf), "%u KB", (unsigned)(ESP.getFreeHeap() / 1024));
-    drawStatRow(x, y, w, rowH, "Freier Speicher", buf, true);
+    drawStatRow(x, y, w, rowH, "Freier Speicher", buf, true, 2);
     y += rowH;
 
     snprintf(buf, sizeof(buf), "%s Rev %d", ESP.getChipModel(), ESP.getChipRevision());
-    drawStatRow(x, y, w, rowH, "Chip", buf, true);
+    drawStatRow(x, y, w, rowH, "Chip", buf, true, 2);
     y += rowH;
 
     snprintf(buf, sizeof(buf), "%u MHz", ESP.getCpuFreqMHz());
-    drawStatRow(x, y, w, rowH, "CPU-Takt", buf, true);
+    drawStatRow(x, y, w, rowH, "CPU-Takt", buf, true, 2);
     y += rowH;
 
     snprintf(buf, sizeof(buf), "%u MB", (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
-    drawStatRow(x, y, w, rowH, "Flash", buf, false);
+    drawStatRow(x, y, w, rowH, "Flash", buf, true, 2);
+    y += rowH;
+
+    // Tappable row - background tint marks it as interactive, unlike the read-only rows above.
+    simRowY = y;
+    simRowH = rowH;
+    bool simOn = RuntimeSettings::simulateBmsData();
+    tft.fillRect(x, y, w, rowH, COLOR_CARD);
+    drawStatRow(x, y, w, rowH, "Simulation (tippen)", simOn ? "AN" : "AUS", false, 2);
 }
 
 void draw(const PaceBmsSnapshot& snapshot) {
@@ -547,6 +577,34 @@ bool handleTouch(int x, int y) {
             return true;
         }
         return false;
+    }
+
+    if (currentPage == Page::System) {
+        if (rebootBtnW > 0 && x >= rebootBtnX && x < rebootBtnX + rebootBtnW && y >= rebootBtnY &&
+            y < rebootBtnY + rebootBtnH) {
+            tft.fillScreen(COLOR_BG);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextColor(COLOR_TEXT, COLOR_BG);
+            tft.setTextFont(2);
+            tft.drawString("Neustart...", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+            tft.setTextDatum(TL_DATUM);
+            delay(500);
+            ESP.restart();
+        }
+
+        if (simRowH > 0 && y >= simRowY && y < simRowY + simRowH) {
+            bool newValue = !RuntimeSettings::simulateBmsData();
+            RuntimeSettings::setSimulateBmsData(newValue);
+            tft.fillScreen(COLOR_BG);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextColor(COLOR_TEXT, COLOR_BG);
+            tft.setTextFont(2);
+            tft.drawString(String("Simulation ") + (newValue ? "AN" : "AUS") + " - Neustart...",
+                            SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+            tft.setTextDatum(TL_DATUM);
+            delay(800);
+            ESP.restart();
+        }
     }
 
     return false;

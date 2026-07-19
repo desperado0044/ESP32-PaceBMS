@@ -3,9 +3,11 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <ElegantOTA.h>
+#include <esp_system.h>
 #include "Config.h"
 #include "CredentialsStorage.h"
 #include "SnapshotStore.h"
+#include "RuntimeSettings.h"
 
 namespace WebUiServer {
 
@@ -54,6 +56,8 @@ const char kIndexHtml[] PROGMEM = R"HTML(
   .pill { border-radius: 6px; padding: 6px 8px; font-size: 0.78rem; text-align: center; background: var(--card-alt); color: var(--dim); }
   .pill.active { background: #0d3a2f; color: var(--ok); }
   .placeholder { color: var(--dim); font-size: 0.9rem; line-height: 1.5; text-align: center; margin-top: 3rem; }
+  button { padding: 0.6rem 1rem; border: none; border-radius: 6px; background: var(--accent); color: #04231c; font-weight: 600; font-size: 0.85rem; cursor: pointer; }
+  button:disabled { opacity: 0.6; cursor: default; }
 </style>
 </head>
 <body>
@@ -175,8 +179,34 @@ async function refreshSystem() {
           <div class="stat"><div class="label">Flash</div><div class="value">${Math.round(s.flashSizeBytes/1024/1024)} MB</div></div>
           <div class="stat"><div class="label">IP</div><div class="value">${s.ip}</div></div>
           <div class="stat"><div class="label">MAC</div><div class="value">${s.mac}</div></div>
+          <div class="stat"><div class="label">Min. freier Speicher</div><div class="value">${Math.round(s.minFreeHeap/1024)} KB</div></div>
+          <div class="stat"><div class="label">Freier Update-Speicher</div><div class="value">${Math.round(s.freeSketchSpaceBytes/1024)} KB</div></div>
+          <div class="stat"><div class="label">Build</div><div class="value">${s.buildTime}</div></div>
+          <div class="stat"><div class="label">Letzter Neustart</div><div class="value">${s.resetReason}</div></div>
         </div>
+      </div>
+      <div class="pack">
+        <h2>Simulationsmodus</h2>
+        <p style="color:var(--dim);font-size:0.85rem;margin:0 0 0.6rem;">
+          Aktuell: <strong style="color:var(--text)">${s.simulateBmsData ? 'AN' : 'AUS'}</strong>
+          - schaltet das BMS-Polling auf Fake-Daten um/zurueck und startet neu.
+        </p>
+        <button id="btn-simulate">Simulation ${s.simulateBmsData ? 'ausschalten' : 'einschalten'}</button>
+      </div>
+      <div class="pack">
+        <h2>Neustart</h2>
+        <button id="btn-reboot" style="background:var(--warn);color:#2a0e08;">Geraet neu starten</button>
       </div>`;
+    document.getElementById('btn-simulate').addEventListener('click', async () => {
+      document.getElementById('btn-simulate').disabled = true;
+      document.getElementById('btn-simulate').textContent = 'Neustart...';
+      await fetch('/api/system/simulate', { method: 'POST' });
+    });
+    document.getElementById('btn-reboot').addEventListener('click', async () => {
+      document.getElementById('btn-reboot').disabled = true;
+      document.getElementById('btn-reboot').textContent = 'Neustart...';
+      await fetch('/api/system/reboot', { method: 'POST' });
+    });
   } catch (e) {
     document.getElementById('page-system').innerHTML = '<div class="placeholder">Fehler beim Laden: ' + e + '</div>';
   }
@@ -317,22 +347,56 @@ String buildJson() {
     return out;
 }
 
+const char* resetReasonText(esp_reset_reason_t reason) {
+    switch (reason) {
+        case ESP_RST_POWERON: return "Power-On";
+        case ESP_RST_EXT: return "Extern (Reset-Pin)";
+        case ESP_RST_SW: return "Software (z.B. OTA/Neustart)";
+        case ESP_RST_PANIC: return "Absturz (Panic)";
+        case ESP_RST_INT_WDT: return "Interner Watchdog";
+        case ESP_RST_TASK_WDT: return "Task-Watchdog";
+        case ESP_RST_WDT: return "Watchdog";
+        case ESP_RST_BROWNOUT: return "Unterspannung (Brownout)";
+        case ESP_RST_SDIO: return "SDIO";
+        default: return "Unbekannt";
+    }
+}
+
 String buildSystemJson() {
     JsonDocument doc;
     doc["uptimeSec"] = millis() / 1000;
     doc["freeHeap"] = ESP.getFreeHeap();
+    doc["minFreeHeap"] = ESP.getMinFreeHeap();
     doc["chipModel"] = ESP.getChipModel();
     doc["chipRevision"] = ESP.getChipRevision();
     doc["cpuFreqMHz"] = ESP.getCpuFreqMHz();
     doc["flashSizeBytes"] = ESP.getFlashChipSize();
+    doc["freeSketchSpaceBytes"] = ESP.getFreeSketchSpace();
+    doc["buildTime"] = String(__DATE__) + " " + String(__TIME__);
+    doc["resetReason"] = resetReasonText(esp_reset_reason());
     doc["wifiConnected"] = WiFi.status() == WL_CONNECTED;
     doc["rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
     doc["ip"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
     doc["mac"] = WiFi.macAddress();
+    doc["simulateBmsData"] = RuntimeSettings::simulateBmsData();
 
     String out;
     serializeJson(doc, out);
     return out;
+}
+
+void handleToggleSimulate(AsyncWebServerRequest* request) {
+    bool newValue = !RuntimeSettings::simulateBmsData();
+    RuntimeSettings::setSimulateBmsData(newValue);
+    request->send(200, "text/plain", newValue ? "an" : "aus");
+    delay(300);
+    ESP.restart();
+}
+
+void handleReboot(AsyncWebServerRequest* request) {
+    request->send(200, "text/plain", "Neustart...");
+    delay(300);
+    ESP.restart();
 }
 
 void handleConfigPage(AsyncWebServerRequest* request) {
@@ -383,6 +447,8 @@ void begin() {
     server.on("/api/system", HTTP_GET, [](AsyncWebServerRequest* request) {
         request->send(200, "application/json", buildSystemJson());
     });
+    server.on("/api/system/simulate", HTTP_POST, handleToggleSimulate);
+    server.on("/api/system/reboot", HTTP_POST, handleReboot);
 
     server.on("/konfiguration", HTTP_GET, handleConfigPage);
     server.on("/api/config/wifi", HTTP_POST, handleSaveWifi);

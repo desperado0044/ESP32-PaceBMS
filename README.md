@@ -27,6 +27,30 @@ Kommandos) wurde von [Tertiush/bmspace](https://github.com/Tertiush/bmspace)
   automatisch in Home Assistant, keine manuelle YAML-Konfiguration nötig (siehe
   „MQTT / Home Assistant" unten).
 
+## Kompatible Geräte (ungetestet, aber möglich)
+
+Folgende Geräte laufen laut [syssi/esphome-pace-bms](https://github.com/syssi/esphome-pace-bms)
+mit einem PACE-BMS-Innenleben — **allerdings über dessen RS485/Modbus-Protokoll**,
+nicht das hier implementierte RS232-ASCII-Protokoll. Ob das RS232-Port bei diesen
+Geräten dasselbe Protokoll spricht wie unser Referenzprojekt
+([Tertiush/bmspace](https://github.com/Tertiush/bmspace)), ist **nicht verifiziert**:
+
+- Katbatt 6.4kWh LiFePO4 (PACE BMS P16S200A)
+- Gobel Power GP-SR1-LF280-RN150 51.2V 280Ah (PACE BMS S16A150)
+- Joyvoit Suns Energy Battery JVBW5KW (PACE BMS P16S100A)
+- Orient Power Wall Mounted Battery 48V100AH
+- SOK 100Ah 48V Server Rack Berry (PACE BMS P16S100A)
+- MeritSun / i-finity LFP 200 - 48V
+- Revov R100 51.2V 100Ah
+- NPP 51.2V 280AH FLCD-30048
+- PowMr 51.2V 100Ah (PACE BMS P16S150A)
+- BSL Batt (mehrere Modelle, Firmware 1.51)
+- Docan Energy Panda Battery Bank
+
+Zusätzlich vom Python-Referenzprojekt (RS232, dieselbe Protokollfamilie wie hier)
+bestätigt: Greenrich U-P5000, Hubble Lithium (AM2, AM4, X-101), Revov R9, SOK 48V
+(100Ah), YouthPower Rack Module, Allith 10kW, Joyvoit BW5KW.
+
 ## Hardware
 
 - ESP32 NodeMCU-Board (PlatformIO-Boardname `esp32dev`)
@@ -109,7 +133,10 @@ umschaltbar):
   Zell-Diff im Header.
 - **Status** — Warnungen im Klartext, Schutz-/FET-/Balancing-Zustände als Badges,
   Kapazitätswerte (Rest/Voll/Design).
-- **System** — Laufzeit, WLAN-Signal, freier Speicher, Chip/CPU/Flash-Info.
+- **System** — Laufzeit, WLAN-Signal, freier Speicher, Chip/CPU/Flash-Info,
+  ein Schalter für den Simulationsmodus (unten) sowie ein **Neustart**-Button
+  (oben rechts, bewusst räumlich getrennt vom Simulations-Schalter, damit man
+  die beiden Touch-Flächen nicht verwechselt).
 
 Auf Übersicht/Zellen/Status zeigt eine kleine Leiste unter der Kopfzeile
 ("Gesamt" oder "Pack X von N" mit `‹ ›`-Wischhinweis), welches Pack gerade
@@ -146,24 +173,28 @@ veralteten (falschen) Werten stehen bleibt oder wortlos verschwindet:
   entprellt, damit ein einzelner verpasster/fehlerhafter Frame nicht sofort alles
   auf 0 blitzen lässt.
 
-Bekannte Lücke: Die einzelnen Zellspannungs-MQTT-Topics (`pack_N/v_cells/cell_i`)
-werden beim Zurücksetzen nicht explizit mit 0 nachpubliziert (die Publish-Schleife
-dafür läuft einfach nicht mehr, da `cellCount` auf 0 gesetzt wird) — die
-Pack-Summenwerte (Spannung/Strom/SOC/Warnungen/Kapazität) werden aber korrekt
-genullt.
+Die einzelnen Zellspannungs-/Temperatur-MQTT-Topics (`pack_N/v_cells/cell_i`,
+`pack_N/temps/temp_i`) werden dabei ebenfalls auf 0 nachpubliziert (`MqttManager`
+merkt sich je Pack die höchste je gemeldete Zell-/Sensorzahl und veröffentlicht
+bis dahin immer, auch wenn die aktuelle Anzahl kleiner ist) — keine der
+retained-Werte bleibt auf einem alten Stand stehen.
 
 ## Simulationsmodus (Entwicklung/Vorschau ohne BMS)
 
-`SIMULATE_BMS_DATA` in `include/Config.h` — wenn `true`, liefert
-`SimulatedBms::fillSimulatedSnapshot()` anstelle einer echten BMS-Abfrage ein
-erfundenes, aber plausibles und langsam driftendes 3-Pack-Testszenario (16
-Zellen/Pack wie bei echten 16S-LiFePO4-Packs, realistische Zellspannungs-Kennlinie
-mit flachem Mittelplateau, SOC/Strom pendelnd über ~4 Minuten). Damit lassen
-sich Display/Web-UI ohne angeschlossenes BMS entwickeln und testen.
+Liefert anstelle einer echten BMS-Abfrage ein erfundenes, aber plausibles und
+langsam driftendes 3-Pack-Testszenario (16 Zellen/Pack wie bei echten
+16S-LiFePO4-Packs, realistische Zellspannungs-Kennlinie mit flachem
+Mittelplateau, SOC/Strom pendelnd über ~4 Minuten) - lässt sich Display/Web-UI
+ohne angeschlossenes BMS entwickeln und testen.
 
-**Wichtig:** Vor dem Anschluss eines echten BMS unbedingt auf `false` zurückstellen
-und neu flashen — sonst werden dauerhaft Fake-Daten statt echter Messwerte
-angezeigt, ohne dass das offensichtlich wäre.
+Umschaltbar zur Laufzeit über den **System**-Tab (Display: Zeile "Simulation
+(tippen)"; Web-UI: Button auf der System-Seite) - speichert die Einstellung im
+NVS und startet neu. `SIMULATE_BMS_DATA` in `include/Config.h` ist nur der
+Startwert für die allererste Inbetriebnahme.
+
+**Wichtig:** Vor dem Anschluss eines echten BMS auf "AUS" umschalten - sonst
+werden dauerhaft Fake-Daten statt echter Messwerte angezeigt, ohne dass das
+offensichtlich wäre.
 
 ## Architektur: zwei Cores, damit das Display nie einfriert
 
@@ -222,11 +253,15 @@ Display bleibt währenddessen normal bedienbar.
    ```
 4. WLAN/MQTT wie oben beschrieben über das Einrichtungsportal konfigurieren.
 
+Das Gerät ist per mDNS auch unter `http://<OTA_HOSTNAME>.local` erreichbar
+(Standard: `http://pacebms.local`), ohne die IP-Adresse nachschlagen zu müssen.
+
 Für spätere Updates steht danach auch OTA über
 [ElegantOTA](https://github.com/ayushsharma82/ElegantOTA) bereit:
 `http://<ip-oder-hostname>/update` (HTTP-Basic-Auth, siehe `OTA_HOSTNAME`/
 `OTA_PASSWORD` in `include/Config.h` — vor einem echten Einsatz das
-Standardpasswort ändern).
+Standardpasswort ändern). Ein Neustart-Button (Display: System-Tab, oben
+rechts; Web-UI: System-Tab) startet das Gerät auch ohne Update jederzeit neu.
 
 ## Web-Oberfläche
 
