@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-constexpr uint8_t PACE_MAX_PACKS = 4;
+constexpr uint8_t PACE_MAX_PACKS = 15;
 constexpr uint8_t PACE_MAX_CELLS = 24;
 constexpr uint8_t PACE_MAX_TEMPS = 8;
 
@@ -54,6 +54,10 @@ struct PaceBmsSnapshot {
     String packSerial;
 
     uint8_t packCount = 0;
+    // 1-based identifier shown to the user for packs[i]/warn[i] - for RS232 this is just the
+    // sequential slot number (i+1, RS232 has no separate physical address); for Modbus it's the
+    // actual configured RS485 slave address (1-15, may have gaps if addresses aren't contiguous).
+    uint8_t packAddress[PACE_MAX_PACKS] = {0};
     PacePackAnalog packs[PACE_MAX_PACKS];
     PacePackWarn warn[PACE_MAX_PACKS];
     PaceCapacity capacity;

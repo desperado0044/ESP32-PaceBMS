@@ -19,7 +19,6 @@ constexpr int MODBUS_UART_RX_PIN = 25;
 constexpr int MODBUS_DE_RE_PIN = 13;
 constexpr unsigned long MODBUS_UART_BAUD = 9600;
 constexpr unsigned long MODBUS_RESPONSE_TIMEOUT_MS = 500;
-constexpr uint8_t MODBUS_SLAVE_ADDRESS = 0x01;
 
 // ---------------------------------------------------------------------------------------------
 // Display (TFT_eSPI, ILI9341, HSPI) + Touch (XPT2046, VSPI) - same physical rig and pin mapping

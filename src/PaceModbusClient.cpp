@@ -1,6 +1,7 @@
 #include "PaceModbusClient.h"
 #include "ModbusRtuProtocol.h"
 #include "Config.h"
+#include "RuntimeSettings.h"
 
 namespace {
 
@@ -91,11 +92,11 @@ bool PaceModbusClient::readFrame(uint8_t* buf, size_t cap, size_t& outLen) {
     return false;
 }
 
-bool PaceModbusClient::readRegisters(uint16_t startRegister, uint16_t count,
+bool PaceModbusClient::readRegisters(uint8_t slaveAddress, uint16_t startRegister, uint16_t count,
                                       const uint8_t*& registerData, size_t& registerCount) {
     uint8_t request[8];
     size_t requestLen = ModbusRtuProtocol::buildReadHoldingRegistersRequest(
-        MODBUS_SLAVE_ADDRESS, startRegister, count, request, sizeof(request));
+        slaveAddress, startRegister, count, request, sizeof(request));
     if (requestLen == 0) {
         lastError_ = "Failed to build Modbus request";
         return false;
@@ -113,7 +114,7 @@ bool PaceModbusClient::readRegisters(uint16_t startRegister, uint16_t count,
 
     ModbusRtuProtocol::ParsedResponse resp =
         ModbusRtuProtocol::parseReadHoldingRegistersResponse(responseBuf_, responseLen,
-                                                              MODBUS_SLAVE_ADDRESS);
+                                                              slaveAddress);
     if (!resp.ok) {
         lastError_ = resp.error ? resp.error : "Unknown Modbus error";
         return false;
@@ -124,24 +125,9 @@ bool PaceModbusClient::readRegisters(uint16_t startRegister, uint16_t count,
     return true;
 }
 
-bool PaceModbusClient::poll(PaceBmsSnapshot& snapshot) {
+void PaceModbusClient::fillPackFromRegisters(const uint8_t* regs, PacePackAnalog& pack,
+                                              PacePackWarn& warn) {
     using namespace ModbusRtuProtocol;
-
-    const uint8_t* regs;
-    size_t regCount;
-    // Registers 0-36 cover current/voltage/SOC/SOH/capacities/cycles/warning-protection-status/
-    // balance/cell voltages/temperatures in a single request - registers 8, 13-14 are reserved
-    // gaps but Modbus happily returns whatever's there for those, no need to split the request.
-    if (!readRegisters(0, 37, regs, regCount)) return false;
-    if (regCount < 37) {
-        lastError_ = "Truncated Modbus register block";
-        return false;
-    }
-
-    snapshot.packCount = 1;  // the Modbus register map has no multi-pack concept, unlike RS232's
-                              // CID2 0x42 "all packs" query
-    PacePackAnalog& pack = snapshot.packs[0];
-    PacePackWarn& warn = snapshot.warn[0];
 
     pack.packCurrentA = registerI16(regs, 0) / 100.0f;    // 10mA units, + charging / - discharging
     pack.packVoltageV = registerU16(regs, 1) / 100.0f;    // 10mV units
@@ -186,16 +172,57 @@ bool PaceModbusClient::poll(PaceBmsSnapshot& snapshot) {
     warn.acInOn = false;            // no equivalent register in the Modbus map
     warn.heartOn = (statusFlag >> 15) & 1;  // "heater" bit - closest match to the RS232 field
     warn.warnings = buildWarningsText(warningFlag, protectionFlag, statusFlag);
-
-    snapshot.capacity.remainCapacityMah = pack.remainingCapacityMah;
-    snapshot.capacity.fullCapacityMah = pack.fullCapacityMah;
-    snapshot.capacity.designCapacityMah = pack.designCapacityMah;
-    snapshot.capacity.socPercent = pack.socPercent;
-    snapshot.capacity.sohPercent = pack.sohPercent;
-
-    if (snapshot.bmsVersion.length() == 0) snapshot.bmsVersion = "Modbus";
     // Version/serial-number registers (150+) intentionally not read - not essential for
     // monitoring, and the RS232 client already covers that path when Modbus isn't selected.
+}
+
+bool PaceModbusClient::poll(PaceBmsSnapshot& snapshot) {
+    uint16_t mask = RuntimeSettings::modbusPackAddressMask();
+    uint8_t index = 0;
+
+    for (uint8_t addr = 1; addr <= 15 && index < PACE_MAX_PACKS; addr++) {
+        if (!(mask & (1u << (addr - 1)))) continue;
+
+        const uint8_t* regs;
+        size_t regCount;
+        bool ok = readRegisters(addr, 0, 37, regs, regCount) && regCount >= 37;
+
+        snapshot.packAddress[index] = addr;
+        if (ok) {
+            failCount_[index] = 0;
+            fillPackFromRegisters(regs, snapshot.packs[index], snapshot.warn[index]);
+        } else {
+            Serial.printf("Modbus: Pack Adresse %u antwortet nicht (%s)\n", addr, lastError_.c_str());
+            if (failCount_[index] < 255) failCount_[index]++;
+            if (failCount_[index] >= BMS_ZERO_AFTER_CONSECUTIVE_FAILURES) {
+                // Debounced, like RS232's disconnect handling - zeroed rather than left showing a
+                // stale reading, but the slot/address itself keeps being shown/published.
+                snapshot.packs[index] = PacePackAnalog();
+                snapshot.warn[index] = PacePackWarn();
+            }
+        }
+        index++;
+    }
+
+    snapshot.packCount = index;
+    if (index == 0) {
+        lastError_ = "Keine Modbus-Packadressen konfiguriert";
+        return false;
+    }
+
+    uint32_t remain = 0, full = 0, design = 0;
+    for (uint8_t i = 0; i < index; i++) {
+        remain += snapshot.packs[i].remainingCapacityMah;
+        full += snapshot.packs[i].fullCapacityMah;
+        design += snapshot.packs[i].designCapacityMah;
+    }
+    snapshot.capacity.remainCapacityMah = remain;
+    snapshot.capacity.fullCapacityMah = full;
+    snapshot.capacity.designCapacityMah = design;
+    snapshot.capacity.socPercent = full > 0 ? (remain * 100.0f) / full : 0;
+    snapshot.capacity.sohPercent = design > 0 ? (full * 100.0f) / design : 0;
+
+    if (snapshot.bmsVersion.length() == 0) snapshot.bmsVersion = "Modbus";
 
     snapshot.valid = true;
     snapshot.lastUpdateMs = millis();

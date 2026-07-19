@@ -25,9 +25,11 @@ Konfiguration-Tab):
   Strombegrenzung-Gangwahl) — diese werden hier aus Sicherheitsgründen bewusst
   **nicht** implementiert, da ein versehentlich geschaltetes MOSFET an einem
   Akkupack ein echtes Risiko ist, kein reines Komfort-Feature.
-- Unterstützt mehrere parallelgeschaltete Packs (wie das Python-Original), sofern
-  das BMS das meldet — Display, Web-UI und MQTT decken alle gemeldeten Packs ab
-  (siehe „Pack-Erkennung & Verhalten bei Trennung" unten).
+- Unterstützt mehrere parallelgeschaltete Packs — bei RS232 meldet das BMS die
+  Anzahl selbst (wie das Python-Original), bei Modbus werden die installierten
+  Pack-Adressen manuell im Konfiguration-Tab angehakt. Display, Web-UI und MQTT
+  decken in beiden Fällen alle konfigurierten Packs ab (siehe „Pack-Erkennung &
+  Verhalten bei Trennung" unten).
 - MQTT mit **Home-Assistant-Autoerkennung** (MQTT Discovery) — Sensoren erscheinen
   automatisch in Home Assistant, keine manuelle YAML-Konfiguration nötig (siehe
   „MQTT / Home Assistant" unten).
@@ -188,9 +190,19 @@ Schutz-/Status-Flags, alle 16 Zellspannungen sowie 6 Temperatursensoren (4×
 Zelle, MOSFET, Umgebung) in einem Rutsch — Version/Seriennummer werden über
 Modbus nicht gelesen.
 
+**Mehrpack-Betrieb:** Anders als RS232 (ein Befehl liefert alle Packs auf
+einmal) ist bei Modbus jedes physische Pack ein eigener Bus-Teilnehmer mit
+eigener Adresse (Dip-Schalter am Pack, 1-15). Welche Adressen tatsächlich
+verbaut sind, wird im Konfiguration-Tab unter **„Modbus-Konfiguration"**
+angehakt (Checkboxen 1-15, gespeichert als Bitmaske, wirksam nach Neustart).
+Jeder Zyklus fragt genau die angehakten Adressen der Reihe nach ab; eine
+einzelne nicht antwortende Adresse wird — wie bei RS232 — erst nach
+`BMS_ZERO_AFTER_CONSECUTIVE_FAILURES` aufeinanderfolgenden Fehlversuchen
+einzeln auf 0 gesetzt, ohne die übrigen Packs zu beeinflussen. Adressen können
+Lücken haben (z.B. 1 und 3, ohne 2) — Display, Web-UI und MQTT zeigen dabei
+konsequent die echte Adresse als Packnummer an, nicht eine reine Zählnummer.
+
 **Einschränkungen gegenüber RS232:**
-- Nur **ein Pack** — das Modbus-Registerschema kennt kein Mehrpack-Konzept wie
-  der RS232-Befehl `0x42` ("alle Packs").
 - Keine Entsprechung für "Vollgeladen", "Pack Indicate" und "Netzteil/AC-In" im
   Status-Tab — diese Felder gibt es im Modbus-Registersatz schlicht nicht,
   bleiben also leer/aus.
@@ -202,31 +214,40 @@ Bisher **nicht an echter Hardware getestet** — nur der Protokoll-Code selbst
 
 ## Pack-Erkennung & Verhalten bei Trennung
 
-Die Anzahl der Packs wird **nicht konfiguriert**, sondern kommt live vom BMS:
-die Antwort auf das Analogdaten-Kommando (CID2 `0x42`, Anfrage mit Pack-Byte
-`FF` = alle Packs) beginnt mit einem 2-Zeichen-Hex-Feld, das die Pack-Anzahl
-angibt (`PaceBmsClient::readAnalogData()`); danach folgen die Werte für jedes
-gemeldete Pack der Reihe nach. Diese Zahl bestimmt, was Display/Web-UI/MQTT
-anzeigen.
+Beide Protokolle füllen dieselben `PaceBmsSnapshot`-Structs, unterscheiden
+sich aber darin, woher die Pack-Anzahl/-Nummerierung kommt:
+
+- **RS232**: Die Anzahl der Packs wird **nicht konfiguriert**, sondern kommt
+  live vom BMS. Die Antwort auf das Analogdaten-Kommando (CID2 `0x42`, Anfrage
+  mit Pack-Byte `FF` = alle Packs) beginnt mit einem 2-Zeichen-Hex-Feld, das
+  die Pack-Anzahl angibt (`PaceBmsClient::readAnalogData()`); danach folgen
+  die Werte für jedes gemeldete Pack der Reihe nach. Die Packnummer ist hier
+  einfach die fortlaufende Position (1, 2, 3, ...).
+- **Modbus**: Die Pack-Anzahl kommt aus der manuell angehakten Adressliste
+  (siehe „Modbus RTU / RS485" oben) — die Packnummer, die Display/Web-UI/MQTT
+  anzeigen, ist hier die echte, konfigurierte Bus-Adresse.
 
 Damit ein Pack, das vorübergehend nicht mehr antwortet, nicht einfach mit
 veralteten (falschen) Werten stehen bleibt oder wortlos verschwindet:
 
-- **Meldet das BMS selbst eine kleinere Pack-Anzahl** (Pack wurde z.B. abgeklemmt,
-  BMS antwortet aber weiter): Das fehlende Pack wird sofort auf 0 zurückgesetzt,
-  bleibt aber als Slot sichtbar/in MQTT veröffentlicht — die Pack-Anzahl selbst
-  schrumpft nie von selbst wieder.
-- **Antwortet das BMS gar nicht mehr** (Timeout): Erst nach
-  `BMS_ZERO_AFTER_CONSECUTIVE_FAILURES` (3, in `Config.h`) aufeinanderfolgenden
-  fehlgeschlagenen Poll-Zyklen werden alle bekannten Pack-Slots auf 0 gesetzt —
-  entprellt, damit ein einzelner verpasster/fehlerhafter Frame nicht sofort alles
-  auf 0 blitzen lässt.
+- **RS232 meldet selbst eine kleinere Pack-Anzahl** (Pack wurde z.B.
+  abgeklemmt, BMS antwortet aber weiter): Das fehlende Pack wird sofort auf 0
+  zurückgesetzt, bleibt aber als Slot sichtbar/in MQTT veröffentlicht — die
+  Pack-Anzahl selbst schrumpft nie von selbst wieder.
+- **Eine Adresse antwortet gar nicht mehr** (Timeout, RS232 wie Modbus): Erst
+  nach `BMS_ZERO_AFTER_CONSECUTIVE_FAILURES` (3, in `Config.h`)
+  aufeinanderfolgenden fehlgeschlagenen Poll-Zyklen wird der betroffene
+  Pack-Slot auf 0 gesetzt — entprellt, damit ein einzelner
+  verpasster/fehlerhafter Frame nicht sofort alles auf 0 blitzen lässt. Bei
+  Modbus geschieht das pro Adresse einzeln, unabhängig von den übrigen Packs.
 
 Die einzelnen Zellspannungs-/Temperatur-MQTT-Topics (`pack_N/v_cells/cell_i`,
 `pack_N/temps/temp_i`) werden dabei ebenfalls auf 0 nachpubliziert (`MqttManager`
 merkt sich je Pack die höchste je gemeldete Zell-/Sensorzahl und veröffentlicht
 bis dahin immer, auch wenn die aktuelle Anzahl kleiner ist) — keine der
-retained-Werte bleibt auf einem alten Stand stehen.
+retained-Werte bleibt auf einem alten Stand stehen. `N` ist dabei bei beiden
+Protokollen dieselbe Packnummer, die auch Display und Web-UI zeigen (RS232:
+fortlaufend, Modbus: die echte Bus-Adresse).
 
 ## Simulationsmodus (Entwicklung/Vorschau ohne BMS)
 

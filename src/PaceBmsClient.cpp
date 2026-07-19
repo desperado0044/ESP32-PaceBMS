@@ -132,6 +132,7 @@ bool PaceBmsClient::readAnalogData(PaceBmsSnapshot& snapshot) {
 
     for (int p = 0; p < reportedCount; p++) {
         PacePackAnalog& pack = snapshot.packs[p];
+        snapshot.packAddress[p] = p + 1;  // RS232 has no separate physical address, just a slot number
 
         long cells = PaceBmsProtocol::readHexField(info, infoLen, pos, 2);
         if (cells < 0 || cells > PACE_MAX_CELLS) {

@@ -243,9 +243,11 @@ void advancePack(int dir, uint8_t packCount) {
     selectedPack = current - 1;
 }
 
-void drawPackBar(uint8_t packCount) {
-    String label = selectedPack < 0 ? "Gesamt"
-                                     : "Pack " + String(selectedPack + 1) + " von " + String(packCount);
+void drawPackBar(const PaceBmsSnapshot& snapshot) {
+    String label = selectedPack < 0 || selectedPack >= snapshot.packCount
+                       ? "Gesamt"
+                       : "Pack " + String(snapshot.packAddress[selectedPack]) + " von " +
+                             String(snapshot.packCount);
     tft.setTextDatum(TC_DATUM);
     tft.setTextFont(1);
     tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
@@ -266,7 +268,7 @@ void drawOverview(const PaceBmsSnapshot& snapshot) {
         drawEmptyState("Keine Paketdaten");
         return;
     }
-    drawPackBar(snapshot.packCount);
+    drawPackBar(snapshot);
 
     bool aggregate = selectedPack < 0 || selectedPack >= snapshot.packCount;
     PacePackAnalog agg;
@@ -285,7 +287,7 @@ void drawOverview(const PaceBmsSnapshot& snapshot) {
             designSum += p.designCapacityMah;
             if (snapshot.warn[i].warnings.length() > 0) {
                 if (warnText.length() > 0) warnText += " | ";
-                warnText += "Pack " + String(i + 1) + ": " + snapshot.warn[i].warnings;
+                warnText += "Pack " + String(snapshot.packAddress[i]) + ": " + snapshot.warn[i].warnings;
             }
         }
         agg.packVoltageV = snapshot.packCount > 0 ? voltageSum / snapshot.packCount : 0;
@@ -371,7 +373,7 @@ void drawCells(const PaceBmsSnapshot& snapshot) {
         drawEmptyState("Keine Zellendaten");
         return;
     }
-    drawPackBar(snapshot.packCount);
+    drawPackBar(snapshot);
     uint8_t idx = (selectedPack >= 0 && selectedPack < snapshot.packCount) ? selectedPack : 0;
     const PacePackAnalog& pack = snapshot.packs[idx];
     if (pack.cellCount == 0) {
@@ -446,7 +448,7 @@ void drawStatus(const PaceBmsSnapshot& snapshot) {
         drawEmptyState("Keine Statusdaten");
         return;
     }
-    drawPackBar(snapshot.packCount);
+    drawPackBar(snapshot);
     uint8_t idx = (selectedPack >= 0 && selectedPack < snapshot.packCount) ? selectedPack : 0;
     const PacePackWarn& warn = snapshot.warn[idx];
     const PacePackAnalog& pack = snapshot.packs[idx];

@@ -18,4 +18,8 @@ bool useModbus() { return prefs.getBool("use_modbus", false); }
 
 void setUseModbus(bool value) { prefs.putBool("use_modbus", value); }
 
+uint16_t modbusPackAddressMask() { return prefs.getUShort("mb_addr_mask", 0x0001); }
+
+void setModbusPackAddressMask(uint16_t mask) { prefs.putUShort("mb_addr_mask", mask); }
+
 }  // namespace RuntimeSettings
