@@ -6,6 +6,7 @@
 #include "BmsDisplayUi.h"
 #include "SnapshotStore.h"
 #include "NetworkTask.h"
+#include "FactoryReset.h"
 
 // Two independent halves, split across cores so a stalled BMS UART read or a WiFi/MQTT hiccup
 // never freezes the touch display:
@@ -28,6 +29,7 @@ void setup() {
     SnapshotStore::begin();
     DisplayHardware::begin();
     BmsDisplayUi::begin();
+    FactoryReset::begin();
 
     NetworkTask::start();
 
@@ -35,6 +37,7 @@ void setup() {
 }
 
 void loop() {
+    FactoryReset::checkButton();
     BmsDisplayUi::update(SnapshotStore::get());
     delay(5);
 }

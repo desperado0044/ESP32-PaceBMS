@@ -29,8 +29,7 @@ Kommandos) wurde von [Tertiush/bmspace](https://github.com/Tertiush/bmspace)
 - MAX3232-Modul (oder ähnlicher RS232-Transceiver) zwischen ESP32-UART2 und dem
   RS232-Port des BMS. Die PACE-BMS-Ports sind **echtes RS232**, nicht TTL — ohne
   Pegelwandler wird nichts empfangen und im schlimmsten Fall Hardware beschädigt.
-- 2.8" TFT SPI, 320×240, ILI9341-Treiber + resistiver Touch (XPT2046) — derselbe
-  Testaufbau/dieselbe Pinbelegung wie im Haustürklingel-Projekt, siehe unten.
+- 2.8" TFT SPI, 320×240, ILI9341-Treiber + resistiver Touch (XPT2046).
 
 ### BMS-UART (UART2)
 
@@ -78,11 +77,19 @@ erlaubt keine eigene Instanz). Konfiguration läuft komplett über `build_flags`
 
 Einbau **horizontal (Querformat)**, `TFT_ROTATION=1` in `include/Config.h`.
 Touch-Kalibrierung: werksseitig nur ein grober Fallback-Bereich hinterlegt — die
-4-Ecken-Kalibrierung einmal durchführen, indem **10 Sekunden lang** irgendwo auf
-dem Display gedrückt gehalten wird (funktioniert unabhängig von WLAN). Bewusst
-ein Dauerdruck statt "N× Tippen" — Letzteres löste beim normalen Wischen/Tippen
-zu leicht aus Versehen aus. Die Werte werden dauerhaft im NVS (`pacebms_calib`)
-gespeichert.
+4-Ecken-Kalibrierung durchführen, indem **10 Sekunden lang** irgendwo auf dem
+Display gedrückt gehalten wird (funktioniert unabhängig von WLAN). Die Werte
+werden dauerhaft im NVS (`pacebms_calib`) gespeichert.
+
+### Werksreset
+
+Den **BOOT/FLASH-Button** auf dem ESP32-Board (GPIO0) **8 Sekunden lang**
+gedrückt halten löscht gespeicherte WLAN-/MQTT-Zugangsdaten (`pacebms_cred`)
+und die Touch-Kalibrierung (`pacebms_calib`) aus dem NVS und startet neu —
+danach öffnet sich wieder das Einrichtungsportal. Bewusst über den physischen
+Button statt eine Touch-Geste, da er auch funktionieren muss, wenn WLAN oder
+die Touch-Kalibrierung selbst kaputt sind, und damit er nicht mit der
+10s-Kalibrier-Geste am Display kollidiert.
 
 ## Display-Oberfläche
 
@@ -252,6 +259,8 @@ User/Passwort werden wie oben beschrieben eingerichtet, nicht im Code.
   (Tap + horizontales Wischen), Touch-Handling.
 - `include/SimulatedBms.h`, `src/SimulatedBms.cpp` — Fake-Datengenerator für den
   Simulationsmodus (siehe oben).
+- `include/FactoryReset.h`, `src/FactoryReset.cpp` — Werksreset über den
+  BOOT/FLASH-Button (siehe oben).
 - `src/main.cpp` — Core-1-Einstiegspunkt: nur Display-Setup + Display-Loop.
 
 ## Lizenz
