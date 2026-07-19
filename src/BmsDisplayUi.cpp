@@ -45,6 +45,22 @@ constexpr int PAGE_H = CONTENT_BOTTOM - PAGE_TOP;
 constexpr int SWIPE_THRESHOLD_PX = 32;
 constexpr int SWIPE_MAX_VERTICAL_PX = 60;
 
+// Modbus pack-address config sub-screen (opened from the System tab) - a rarely-used setup screen,
+// not a main navigation tab, so it's a full-screen overlay that bypasses the tab bar entirely
+// rather than taking up a permanent 5th tab slot.
+constexpr int MB_GRID_COLS = 5;
+constexpr int MB_CHIP_W = 54;
+constexpr int MB_CHIP_H = 40;
+constexpr int MB_GAP_X = 8;
+constexpr int MB_GAP_Y = 10;
+constexpr int MB_GRID_TOP = 40;
+constexpr int MB_GRID_LEFT =
+    (SCREEN_WIDTH - (MB_GRID_COLS * MB_CHIP_W + (MB_GRID_COLS - 1) * MB_GAP_X)) / 2;
+constexpr int MB_BACK_X = 4, MB_BACK_Y = 4, MB_BACK_W = 70, MB_BACK_H = 22;
+constexpr int MB_SAVE_W = 200, MB_SAVE_H = 30;
+constexpr int MB_SAVE_X = (SCREEN_WIDTH - MB_SAVE_W) / 2;
+constexpr int MB_SAVE_Y = SCREEN_HEIGHT - MB_SAVE_H - 8;
+
 enum class Page { Overview = 0, Cells = 1, Status = 2, System = 3 };
 
 Page currentPage = Page::Overview;
@@ -62,13 +78,49 @@ bool swipeConsumed = false;
 int16_t swipeStartX = 0;
 int16_t swipeStartY = 0;
 
-// Bounds of the tappable "Simulation an/aus" row on the System tab, set each time it's drawn.
-int simRowY = 0;
-int simRowH = 0;
+// Bounds of the System tab's three config buttons (BMS-Anschluss, Modbus-Konfig, Simulation),
+// sitting side by side in one row - set each time the tab is drawn.
+int protocolRowX = 0, protocolRowY = 0, protocolRowW = 0, protocolRowH = 0;
+int modbusBtnRowX = 0, modbusBtnRowY = 0, modbusBtnRowW = 0, modbusBtnRowH = 0;
+int simRowX = 0, simRowY = 0, simRowW = 0, simRowH = 0;
 
-// Bounds of the "Neustart" button on the System tab - placed top-right, away from the Simulation
-// row at the bottom, so the two touch targets can't be mixed up.
+// Bounds of the "Neustart" button on the System tab - placed top-right, away from the config
+// button row below, so the two touch targets can't be mixed up.
 int rebootBtnX = 0, rebootBtnY = 0, rebootBtnW = 0, rebootBtnH = 0;
+
+// Modbus pack-address config overlay: open/closed, and the bitmask being edited (only written to
+// RuntimeSettings - and only then triggers a reboot - once "Speichern" is tapped, so ticking 15
+// boxes doesn't mean 15 reboots).
+bool modbusConfigOpen = false;
+uint16_t modbusConfigEditMask = 0;
+
+void modbusChipBounds(int index, int& cx, int& cy, int& cw, int& ch) {
+    int col = index % MB_GRID_COLS;
+    int row = index / MB_GRID_COLS;
+    cx = MB_GRID_LEFT + col * (MB_CHIP_W + MB_GAP_X);
+    cy = MB_GRID_TOP + row * (MB_CHIP_H + MB_GAP_Y);
+    cw = MB_CHIP_W;
+    ch = MB_CHIP_H;
+}
+
+// Hit-testing uses the full column/row pitch (chip + gap), not just the visually drawn chip
+// rectangle - on a small resistive touchscreen the gap between chips is dead space that only makes
+// a dense 15-item grid harder to hit, not clearer to read, so a touch anywhere between two chips
+// resolves to whichever one it's closer to instead of missing both. Returns -1 for no hit.
+int modbusChipIndexAt(int x, int y) {
+    constexpr int colPitch = MB_CHIP_W + MB_GAP_X;
+    constexpr int rowPitch = MB_CHIP_H + MB_GAP_Y;
+    int relX = x - (MB_GRID_LEFT - MB_GAP_X / 2);
+    int relY = y - (MB_GRID_TOP - MB_GAP_Y / 2);
+    if (relX < 0 || relY < 0) return -1;
+    int col = relX / colPitch;
+    int row = relY / rowPitch;
+    if (col < 0 || col >= MB_GRID_COLS) return -1;
+    constexpr int rows = (15 + MB_GRID_COLS - 1) / MB_GRID_COLS;
+    if (row < 0 || row >= rows) return -1;
+    int index = row * MB_GRID_COLS + col;
+    return index < 15 ? index : -1;
+}
 
 // ---- low-level drawing helpers -----------------------------------------------------------
 
@@ -132,10 +184,15 @@ void drawCurrentArrow(int cx, int cy, float currentA) {
 
 void drawStatRow(int x, int y, int w, int h, const char* label, const String& value,
                   bool divider, uint8_t valueFont = 4) {
+    // The label (always font 2) and value (font 2 or 4, caller's choice) only share a vertical
+    // center when they're offset to match - the -8/+2 pair below was tuned for a font-4 value
+    // sitting next to a font-2 label; when the value is font 2 too (System tab rows), both need
+    // the same offset (0) or the label visibly sits higher than the value.
+    int labelYOffset = valueFont >= 4 ? -8 : 0;
     tft.setTextDatum(ML_DATUM);
     tft.setTextFont(2);
     tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
-    tft.drawString(label, x, y + h / 2 - 8);
+    tft.drawString(label, x, y + h / 2 + labelYOffset);
 
     tft.setTextDatum(MR_DATUM);
     tft.setTextFont(valueFont);
@@ -496,8 +553,8 @@ void drawSystemInfo() {
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.drawString("System", SCREEN_WIDTH / 2, CONTENT_TOP + 6);
 
-    // Top-right, well away from the "Simulation" row at the bottom of this page - two distinct
-    // touch targets that are easy to tell apart, so one can't be hit by accident going for the other.
+    // Top-right, well away from the tappable rows below - two distinct touch targets that are
+    // easy to tell apart, so one can't be hit by accident going for the other.
     rebootBtnW = 64;
     rebootBtnH = 20;
     rebootBtnX = SCREEN_WIDTH - rebootBtnW - 8;
@@ -507,7 +564,6 @@ void drawSystemInfo() {
     tft.setTextFont(1);
     tft.setTextColor(COLOR_WARN, COLOR_WARN_DIM);
     tft.drawString("Neustart", rebootBtnX + rebootBtnW / 2, rebootBtnY + rebootBtnH / 2);
-    tft.setTextDatum(TC_DATUM);
 
     unsigned long upSec = millis() / 1000;
     unsigned long upH = upSec / 3600;
@@ -536,27 +592,101 @@ void drawSystemInfo() {
     drawStatRow(x, y, w, rowH, "Freier Speicher", buf, true, 2);
     y += rowH;
 
-    snprintf(buf, sizeof(buf), "%s Rev %d", ESP.getChipModel(), ESP.getChipRevision());
-    drawStatRow(x, y, w, rowH, "Chip", buf, true, 2);
-    y += rowH;
+    // Three real buttons side by side, not stacked list rows - a thin full-width row wedged
+    // between others turned out too fiddly to hit reliably on a small resistive touchscreen even
+    // with gaps added between rows. Properly sized, clearly bordered, well-separated buttons are a
+    // much bigger and more forgiving target.
+    constexpr int kBtnGap = 10;
+    constexpr int kBtnH = 70;  // plenty of unused space below the read-only rows to grow into
+    y += kBtnGap;
 
-    snprintf(buf, sizeof(buf), "%u MHz", ESP.getCpuFreqMHz());
-    drawStatRow(x, y, w, rowH, "CPU-Takt", buf, true, 2);
-    y += rowH;
+    int btnW = (w - 2 * kBtnGap) / 3;
 
-    snprintf(buf, sizeof(buf), "%u MB", (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
-    drawStatRow(x, y, w, rowH, "Flash", buf, true, 2);
-    y += rowH;
+    // Toggle buttons show the *current* state large, and the state a tap switches *to* smaller
+    // and in parentheses below - otherwise it's not obvious that tapping "RS232" does anything, let
+    // alone that it switches to Modbus specifically.
+    bool useModbus = RuntimeSettings::useModbus();
+    protocolRowX = x;
+    protocolRowY = y;
+    protocolRowW = btnW;
+    protocolRowH = kBtnH;
+    tft.fillRoundRect(protocolRowX, y, btnW, kBtnH, 6, COLOR_CARD);
+    tft.drawRoundRect(protocolRowX, y, btnW, kBtnH, 6, COLOR_DIVIDER);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(2);
+    tft.setTextColor(COLOR_TEXT, COLOR_CARD);
+    tft.drawString(useModbus ? "Modbus" : "RS232", protocolRowX + btnW / 2, y + kBtnH / 2 - 12);
+    tft.setTextFont(1);
+    tft.setTextColor(COLOR_TEXT_DIM, COLOR_CARD);
+    tft.drawString(useModbus ? "(RS232)" : "(Modbus)", protocolRowX + btnW / 2, y + kBtnH / 2 + 14);
 
-    // Tappable row - background tint marks it as interactive, unlike the read-only rows above.
+    modbusBtnRowX = protocolRowX + btnW + kBtnGap;
+    modbusBtnRowY = y;
+    modbusBtnRowW = btnW;
+    modbusBtnRowH = kBtnH;
+    tft.fillRoundRect(modbusBtnRowX, y, btnW, kBtnH, 6, COLOR_ACCENT_DIM);
+    tft.drawRoundRect(modbusBtnRowX, y, btnW, kBtnH, 6, COLOR_ACCENT);
+    tft.setTextFont(2);
+    tft.setTextColor(COLOR_OK, COLOR_ACCENT_DIM);
+    tft.drawString("Modbus", modbusBtnRowX + btnW / 2, y + kBtnH / 2 - 12);
+    tft.setTextFont(1);
+    tft.drawString("Konfig", modbusBtnRowX + btnW / 2, y + kBtnH / 2 + 14);
+
+    simRowX = modbusBtnRowX + btnW + kBtnGap;
     simRowY = y;
-    simRowH = rowH;
+    simRowW = x + w - simRowX;  // fill remaining width exactly, absorbs any rounding remainder
+    simRowH = kBtnH;
     bool simOn = RuntimeSettings::simulateBmsData();
-    tft.fillRect(x, y, w, rowH, COLOR_CARD);
-    drawStatRow(x, y, w, rowH, "Simulation (tippen)", simOn ? "AN" : "AUS", false, 2);
+    tft.fillRoundRect(simRowX, y, simRowW, kBtnH, 6, COLOR_CARD);
+    tft.drawRoundRect(simRowX, y, simRowW, kBtnH, 6, COLOR_DIVIDER);
+    tft.setTextFont(2);
+    tft.setTextColor(COLOR_TEXT, COLOR_CARD);
+    tft.drawString(simOn ? "SIM: AN" : "SIM: AUS", simRowX + simRowW / 2, y + kBtnH / 2 - 12);
+    tft.setTextFont(1);
+    tft.setTextColor(COLOR_TEXT_DIM, COLOR_CARD);
+    tft.drawString(simOn ? "(AUS)" : "(AN)", simRowX + simRowW / 2, y + kBtnH / 2 + 14);
+    tft.setTextDatum(TC_DATUM);
+}
+
+void drawModbusConfig() {
+    tft.fillScreen(COLOR_BG);
+
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextFont(2);
+    tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
+    tft.drawString("< Zurueck", MB_BACK_X + 4, MB_BACK_Y + 3);
+
+    tft.setTextDatum(TC_DATUM);
+    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    tft.drawString("Modbus Pack-Adressen", SCREEN_WIDTH / 2, MB_BACK_Y + 3);
+
+    for (int i = 0; i < 15; i++) {
+        int cx, cy, cw, ch;
+        modbusChipBounds(i, cx, cy, cw, ch);
+        bool on = modbusConfigEditMask & (1u << i);
+        uint16_t bg = on ? COLOR_ACCENT_DIM : COLOR_CARD;
+        uint16_t fg = on ? COLOR_OK : COLOR_TEXT_DIM;
+        tft.fillRoundRect(cx, cy, cw, ch, 4, bg);
+        tft.drawRoundRect(cx, cy, cw, ch, 4, on ? COLOR_ACCENT : COLOR_DIVIDER);
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextFont(2);
+        tft.setTextColor(fg, bg);
+        tft.drawString(String(i + 1), cx + cw / 2, cy + ch / 2);
+    }
+
+    tft.fillRoundRect(MB_SAVE_X, MB_SAVE_Y, MB_SAVE_W, MB_SAVE_H, 5, COLOR_ACCENT);
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextFont(2);
+    tft.setTextColor(COLOR_BG, COLOR_ACCENT);
+    tft.drawString("Speichern & Neustart", MB_SAVE_X + MB_SAVE_W / 2, MB_SAVE_Y + MB_SAVE_H / 2);
+    tft.setTextDatum(TL_DATUM);
 }
 
 void draw(const PaceBmsSnapshot& snapshot) {
+    if (modbusConfigOpen) {
+        drawModbusConfig();
+        return;
+    }
     drawTopBar(snapshot);
     switch (currentPage) {
         case Page::Overview: drawOverview(snapshot); break;
@@ -569,6 +699,32 @@ void draw(const PaceBmsSnapshot& snapshot) {
 
 // Returns true if handling the touch requires a redraw.
 bool handleTouch(int x, int y) {
+    if (modbusConfigOpen) {
+        if (x >= MB_BACK_X && x < MB_BACK_X + MB_BACK_W && y >= MB_BACK_Y &&
+            y < MB_BACK_Y + MB_BACK_H) {
+            modbusConfigOpen = false;
+            return true;
+        }
+        if (x >= MB_SAVE_X && x < MB_SAVE_X + MB_SAVE_W && y >= MB_SAVE_Y &&
+            y < MB_SAVE_Y + MB_SAVE_H) {
+            RuntimeSettings::setModbusPackAddressMask(modbusConfigEditMask);
+            tft.fillScreen(COLOR_BG);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextColor(COLOR_TEXT, COLOR_BG);
+            tft.setTextFont(2);
+            tft.drawString("Gespeichert - Neustart...", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+            tft.setTextDatum(TL_DATUM);
+            delay(600);
+            ESP.restart();
+        }
+        int chipIdx = modbusChipIndexAt(x, y);
+        if (chipIdx >= 0) {
+            modbusConfigEditMask ^= (1u << chipIdx);
+            return true;
+        }
+        return false;
+    }
+
     if (y >= SCREEN_HEIGHT - TAB_BAR_H) {
         int tab = x / TAB_W;
         if (tab < 0) tab = 0;
@@ -594,7 +750,31 @@ bool handleTouch(int x, int y) {
             ESP.restart();
         }
 
-        if (simRowH > 0 && y >= simRowY && y < simRowY + simRowH) {
+        if (protocolRowW > 0 && x >= protocolRowX && x < protocolRowX + protocolRowW &&
+            y >= protocolRowY && y < protocolRowY + protocolRowH) {
+            bool newValue = !RuntimeSettings::useModbus();
+            RuntimeSettings::setUseModbus(newValue);
+            tft.fillScreen(COLOR_BG);
+            tft.setTextDatum(MC_DATUM);
+            tft.setTextColor(COLOR_TEXT, COLOR_BG);
+            tft.setTextFont(2);
+            tft.drawString(String("BMS-Anschluss: ") + (newValue ? "Modbus" : "RS232") +
+                                " - Neustart...",
+                            SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+            tft.setTextDatum(TL_DATUM);
+            delay(800);
+            ESP.restart();
+        }
+
+        if (modbusBtnRowW > 0 && x >= modbusBtnRowX && x < modbusBtnRowX + modbusBtnRowW &&
+            y >= modbusBtnRowY && y < modbusBtnRowY + modbusBtnRowH) {
+            modbusConfigEditMask = RuntimeSettings::modbusPackAddressMask();
+            modbusConfigOpen = true;
+            return true;
+        }
+
+        if (simRowW > 0 && x >= simRowX && x < simRowX + simRowW && y >= simRowY &&
+            y < simRowY + simRowH) {
             bool newValue = !RuntimeSettings::simulateBmsData();
             RuntimeSettings::setSimulateBmsData(newValue);
             tft.fillScreen(COLOR_BG);
@@ -685,10 +865,11 @@ void update(const PaceBmsSnapshot& snapshot) {
         lastDrawMs = now;
         lastTopBarMs = now;
         everDrawn = true;
-    } else if (now - lastTopBarMs > 1000) {
+    } else if (!modbusConfigOpen && now - lastTopBarMs > 1000) {
         // Keeps the age readout / WiFi status / freshness dot live without the full-screen
         // clear+redraw a whole-page refresh would cause (that was visible as a flash every couple
-        // of seconds) - the top bar alone is a small, cheap redraw.
+        // of seconds) - the top bar alone is a small, cheap redraw. The Modbus config overlay has
+        // no top bar at all, so it must never fire here while that's open.
         drawTopBar(snapshot);
         lastTopBarMs = now;
     }
