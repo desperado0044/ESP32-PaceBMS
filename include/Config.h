@@ -74,6 +74,12 @@ constexpr const char* MQTT_DEFAULT_PASS = "";
 
 constexpr uint16_t WEB_SERVER_PORT = 80;
 
+// OTA firmware updates via ElegantOTA on the existing web server, under /update, protected with
+// HTTP Basic Auth. Change OTA_PASSWORD before a real deployment - this is a compiled-in default,
+// same as the Haustuerklingel project's OTA setup.
+constexpr const char* OTA_HOSTNAME = "PaceBMS";
+constexpr const char* OTA_PASSWORD = "1234567890";
+
 // ---------------------------------------------------------------------------------------------
 // WiFi provisioning (WiFiManager). No credentials are compiled in - on first boot (or whenever
 // no working WiFi is saved) the device opens a captive portal AP at a fixed IP, where WiFi *and*

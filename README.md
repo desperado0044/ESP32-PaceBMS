@@ -222,6 +222,12 @@ Display bleibt währenddessen normal bedienbar.
    ```
 4. WLAN/MQTT wie oben beschrieben über das Einrichtungsportal konfigurieren.
 
+Für spätere Updates steht danach auch OTA über
+[ElegantOTA](https://github.com/ayushsharma82/ElegantOTA) bereit:
+`http://<ip-oder-hostname>/update` (HTTP-Basic-Auth, siehe `OTA_HOSTNAME`/
+`OTA_PASSWORD` in `include/Config.h` — vor einem echten Einsatz das
+Standardpasswort ändern).
+
 ## Web-Oberfläche
 
 Nach dem Verbinden läuft ein Webserver auf Port 80 mit Tabs analog zum Display
