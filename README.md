@@ -169,6 +169,14 @@ umschaltbar):
   rechts, bewusst weit von diesen drei Buttons getrennt, damit man die
   Touch-Flächen nicht verwechselt.
 
+| Übersicht | Zellen |
+|---|---|
+| ![Übersicht-Tab](docs/images/display-uebersicht.jpg) | ![Zellen-Tab](docs/images/display-zellen.jpg) |
+
+| Status | System |
+|---|---|
+| ![Status-Tab](docs/images/display-status.jpg) | ![System-Tab](docs/images/display-system.jpg) |
+
 Auf Übersicht/Zellen/Status zeigt eine kleine Leiste unter der Kopfzeile
 ("Gesamt" oder "Pack X von N" mit `‹ ›`-Wischhinweis), welches Pack gerade
 angezeigt wird. Per **horizontalem Wischen** irgendwo im Inhaltsbereich wechselt
@@ -390,6 +398,7 @@ User/Passwort werden wie oben beschrieben eingerichtet, nicht im Code.
 - `include/FactoryReset.h`, `src/FactoryReset.cpp` — Werksreset über den
   BOOT/FLASH-Button (siehe oben).
 - `src/main.cpp` — Core-1-Einstiegspunkt: nur Display-Setup + Display-Loop.
+- `docs/images/` — Display-Screenshots (siehe „Display-Oberfläche" oben).
 
 ## Lizenz
 
