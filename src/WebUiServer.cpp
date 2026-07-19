@@ -1,6 +1,7 @@
 #include "WebUiServer.h"
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
 #include "Config.h"
 #include "CredentialsStorage.h"
 #include "SnapshotStore.h"
@@ -63,17 +64,14 @@ const char kIndexHtml[] PROGMEM = R"HTML(
   <button data-page="uebersicht" class="active">Uebersicht</button>
   <button data-page="zellen">Zellen</button>
   <button data-page="status">Status</button>
-  <button data-page="steuerung">Steuerung</button>
+  <button data-page="system">System</button>
   <a href="/konfiguration">Konfiguration</a>
 </nav>
 <main>
   <div class="page active" id="page-uebersicht"></div>
   <div class="page" id="page-zellen"></div>
   <div class="page" id="page-status"></div>
-  <div class="page" id="page-steuerung">
-    <div class="placeholder">Steuerung ist noch nicht verfuegbar: das PACE-Protokoll fuer<br>
-    Schreibbefehle ist nicht dokumentiert. Folgt, sobald die Kommandos bekannt sind.</div>
-  </div>
+  <div class="page" id="page-system"></div>
 </main>
 <script>
 function activatePage(name) {
@@ -155,8 +153,38 @@ async function refresh() {
     document.getElementById('meta').textContent = 'Fehler beim Laden: ' + e;
   }
 }
+
+function fmtUptime(sec) {
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = Math.floor(sec % 60);
+  return h + 'h ' + String(m).padStart(2,'0') + 'm ' + String(s).padStart(2,'0') + 's';
+}
+
+async function refreshSystem() {
+  try {
+    const res = await fetch('/api/system');
+    const s = await res.json();
+    document.getElementById('page-system').innerHTML = `
+      <div class="pack">
+        <div class="stats">
+          <div class="stat"><div class="label">Laufzeit</div><div class="value">${fmtUptime(s.uptimeSec)}</div></div>
+          <div class="stat"><div class="label">WLAN-Signal</div><div class="value">${s.wifiConnected ? s.rssi + ' dBm' : '--'}</div></div>
+          <div class="stat"><div class="label">Freier Speicher</div><div class="value">${Math.round(s.freeHeap/1024)} KB</div></div>
+          <div class="stat"><div class="label">Chip</div><div class="value">${s.chipModel} Rev ${s.chipRevision}</div></div>
+          <div class="stat"><div class="label">CPU-Takt</div><div class="value">${s.cpuFreqMHz} MHz</div></div>
+          <div class="stat"><div class="label">Flash</div><div class="value">${Math.round(s.flashSizeBytes/1024/1024)} MB</div></div>
+          <div class="stat"><div class="label">IP</div><div class="value">${s.ip}</div></div>
+          <div class="stat"><div class="label">MAC</div><div class="value">${s.mac}</div></div>
+        </div>
+      </div>`;
+  } catch (e) {
+    document.getElementById('page-system').innerHTML = '<div class="placeholder">Fehler beim Laden: ' + e + '</div>';
+  }
+}
+
 refresh();
+refreshSystem();
 setInterval(refresh, 5000);
+setInterval(refreshSystem, 5000);
 </script>
 </body>
 </html>
@@ -193,7 +221,7 @@ const char kConfigHtml[] PROGMEM = R"HTML(
   <a href="/#uebersicht">Uebersicht</a>
   <a href="/#zellen">Zellen</a>
   <a href="/#status">Status</a>
-  <a href="/#steuerung">Steuerung</a>
+  <a href="/#system">System</a>
   <a href="/konfiguration" class="active">Konfiguration</a>
 </nav>
 <main>
@@ -288,6 +316,24 @@ String buildJson() {
     return out;
 }
 
+String buildSystemJson() {
+    JsonDocument doc;
+    doc["uptimeSec"] = millis() / 1000;
+    doc["freeHeap"] = ESP.getFreeHeap();
+    doc["chipModel"] = ESP.getChipModel();
+    doc["chipRevision"] = ESP.getChipRevision();
+    doc["cpuFreqMHz"] = ESP.getCpuFreqMHz();
+    doc["flashSizeBytes"] = ESP.getFlashChipSize();
+    doc["wifiConnected"] = WiFi.status() == WL_CONNECTED;
+    doc["rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
+    doc["ip"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
+    doc["mac"] = WiFi.macAddress();
+
+    String out;
+    serializeJson(doc, out);
+    return out;
+}
+
 void handleConfigPage(AsyncWebServerRequest* request) {
     String html = kConfigHtml;
     html.replace("%WIFI_SSID%", CredentialsManager::instance().getWifiSsid());
@@ -331,6 +377,10 @@ void begin() {
 
     server.on("/api/data", HTTP_GET, [](AsyncWebServerRequest* request) {
         request->send(200, "application/json", buildJson());
+    });
+
+    server.on("/api/system", HTTP_GET, [](AsyncWebServerRequest* request) {
+        request->send(200, "application/json", buildSystemJson());
     });
 
     server.on("/konfiguration", HTTP_GET, handleConfigPage);
