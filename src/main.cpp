@@ -7,6 +7,7 @@
 #include "SnapshotStore.h"
 #include "NetworkTask.h"
 #include "FactoryReset.h"
+#include "RuntimeSettings.h"
 
 // Two independent halves, split across cores so a stalled BMS UART read or a WiFi/MQTT hiccup
 // never freezes the touch display:
@@ -26,6 +27,7 @@ void setup() {
 
     CalibrationManager::instance().begin();
     CredentialsManager::instance().begin();
+    RuntimeSettings::begin();
     SnapshotStore::begin();
     DisplayHardware::begin();
     BmsDisplayUi::begin();

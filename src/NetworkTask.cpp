@@ -1,5 +1,6 @@
 #include "NetworkTask.h"
 #include <Arduino.h>
+#include <ESPmDNS.h>
 #include "Config.h"
 #include "PaceBmsClient.h"
 #include "WifiProvisioning.h"
@@ -7,6 +8,7 @@
 #include "WebUiServer.h"
 #include "SnapshotStore.h"
 #include "SimulatedBms.h"
+#include "RuntimeSettings.h"
 
 namespace NetworkTask {
 
@@ -30,6 +32,10 @@ void taskEntry(void* /*pvParameters*/) {
         if (!servicesStarted && WifiManager::isConnected()) {
             MqttManager::begin();
             WebUiServer::begin();
+            if (MDNS.begin(OTA_HOSTNAME)) {
+                MDNS.addService("http", "tcp", WEB_SERVER_PORT);
+                Serial.printf("mDNS: reachable as %s.local\n", OTA_HOSTNAME);
+            }
             servicesStarted = true;
         }
         if (servicesStarted) {
@@ -40,7 +46,7 @@ void taskEntry(void* /*pvParameters*/) {
         unsigned long now = millis();
         if (now - lastPollMs >= BMS_POLL_INTERVAL_MS) {
             lastPollMs = now;
-            if (SIMULATE_BMS_DATA) {
+            if (RuntimeSettings::simulateBmsData()) {
                 SimulatedBms::fillSimulatedSnapshot(workingSnapshot);
                 consecutiveFailures = 0;
                 SnapshotStore::set(workingSnapshot);
