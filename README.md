@@ -160,10 +160,14 @@ umschaltbar):
   Zell-Diff im Header.
 - **Status** — Warnungen im Klartext, Schutz-/FET-/Balancing-Zustände als Badges,
   Kapazitätswerte (Rest/Voll/Design).
-- **System** — Laufzeit, WLAN-Signal, freier Speicher, Chip/CPU/Flash-Info,
-  ein Schalter für den Simulationsmodus (unten) sowie ein **Neustart**-Button
-  (oben rechts, bewusst räumlich getrennt vom Simulations-Schalter, damit man
-  die beiden Touch-Flächen nicht verwechselt).
+- **System** — Laufzeit, WLAN-Signal, freier Speicher (Chip-/CPU-/Flash-Details
+  stehen nur noch im Web-UI-System-Tab, hier bewusst weggelassen); darunter drei
+  große Buttons nebeneinander: **RS232/Modbus** (aktueller Zustand groß, die
+  Alternative klein in Klammern darunter), **Modbus-Konfig** (öffnet den
+  Vollbild-Screen zur Pack-Adressauswahl, siehe „Modbus RTU / RS485" oben) und
+  **Sim: AN/AUS** (gleiches Klammer-Prinzip). Ein **Neustart**-Button sitzt oben
+  rechts, bewusst weit von diesen drei Buttons getrennt, damit man die
+  Touch-Flächen nicht verwechselt.
 
 Auf Übersicht/Zellen/Status zeigt eine kleine Leiste unter der Kopfzeile
 ("Gesamt" oder "Pack X von N" mit `‹ ›`-Wischhinweis), welches Pack gerade
@@ -180,9 +184,10 @@ Sekundentakt hätte sichtbar geblitzt.
 
 ## Modbus RTU / RS485
 
-Alternative zum RS232-Anschluss, umschaltbar im **Konfiguration**-Tab (Web) —
-Auswahl speichern startet neu, wie bei WLAN/MQTT-Änderungen. Implementiert
-nach dem Registerdokument
+Alternative zum RS232-Anschluss, umschaltbar im **Konfiguration**-Tab (Web) oder
+über den "RS232/Modbus"-Button im **System**-Tab des Displays — Auswahl
+speichern startet neu, wie bei WLAN/MQTT-Änderungen. Implementiert nach dem
+Registerdokument
 [PACE-BMS-Modbus-Protocol-for-RS485-V1.3-20170627.pdf](https://github.com/syssi/esphome-pace-bms/blob/main/docs/PACE-BMS-Modbus-Protocol-for-RS485-V1.3-20170627.pdf)
 (`syssi/esphome-pace-bms`). Ein einzelner Read-Holding-Registers-Request
 (Register 0-36) liefert Strom/Spannung/SOC/SOH/Kapazitäten/Zyklen, Warn-/
@@ -193,9 +198,10 @@ Modbus nicht gelesen.
 **Mehrpack-Betrieb:** Anders als RS232 (ein Befehl liefert alle Packs auf
 einmal) ist bei Modbus jedes physische Pack ein eigener Bus-Teilnehmer mit
 eigener Adresse (Dip-Schalter am Pack, 1-15). Welche Adressen tatsächlich
-verbaut sind, wird im Konfiguration-Tab unter **„Modbus-Konfiguration"**
-angehakt (Checkboxen 1-15, gespeichert als Bitmaske, wirksam nach Neustart).
-Jeder Zyklus fragt genau die angehakten Adressen der Reihe nach ab; eine
+verbaut sind, wird entweder im Konfiguration-Tab unter **„Modbus-Konfiguration"**
+(Web) oder direkt am Gerät über den "Modbus-Konfig"-Button im **System**-Tab
+angehakt (Checkboxen/Kacheln 1-15, gespeichert als Bitmaske, wirksam nach
+Neustart). Jeder Zyklus fragt genau die angehakten Adressen der Reihe nach ab; eine
 einzelne nicht antwortende Adresse wird — wie bei RS232 — erst nach
 `BMS_ZERO_AFTER_CONSECUTIVE_FAILURES` aufeinanderfolgenden Fehlversuchen
 einzeln auf 0 gesetzt, ohne die übrigen Packs zu beeinflussen. Adressen können
@@ -257,10 +263,10 @@ langsam driftendes 3-Pack-Testszenario (16 Zellen/Pack wie bei echten
 Mittelplateau, SOC/Strom pendelnd über ~4 Minuten) - lässt sich Display/Web-UI
 ohne angeschlossenes BMS entwickeln und testen.
 
-Umschaltbar zur Laufzeit über den **System**-Tab (Display: Zeile "Simulation
-(tippen)"; Web-UI: Button auf der System-Seite) - speichert die Einstellung im
-NVS und startet neu. `SIMULATE_BMS_DATA` in `include/Config.h` ist nur der
-Startwert für die allererste Inbetriebnahme.
+Umschaltbar zur Laufzeit über den **System**-Tab (Display: "Sim: AN/AUS"-Button;
+Web-UI: Button auf der System-Seite) - speichert die Einstellung im NVS und
+startet neu. `SIMULATE_BMS_DATA` in `include/Config.h` ist nur der Startwert
+für die allererste Inbetriebnahme.
 
 **Wichtig:** Vor dem Anschluss eines echten BMS auf "AUS" umschalten - sonst
 werden dauerhaft Fake-Daten statt echter Messwerte angezeigt, ohne dass das
