@@ -3,6 +3,7 @@
 #include "TouchCalibration.h"
 #include "WifiProvisioning.h"
 #include "Config.h"
+#include <WiFi.h>
 #include <math.h>
 
 namespace BmsDisplayUi {
@@ -25,8 +26,6 @@ constexpr uint16_t COLOR_OK = rgb565(90, 210, 130);
 constexpr uint16_t COLOR_TEXT = 0xFFFF;
 constexpr uint16_t COLOR_TEXT_DIM = rgb565(140, 145, 160);
 constexpr uint16_t COLOR_DIVIDER = rgb565(42, 44, 52);
-constexpr uint16_t COLOR_DISABLED = rgb565(45, 46, 52);
-constexpr uint16_t COLOR_DISABLED_TEXT = rgb565(95, 97, 105);
 
 constexpr int TOP_BAR_H = 24;
 constexpr int TAB_BAR_H = 32;
@@ -37,7 +36,7 @@ constexpr int TAB_COUNT = 4;
 constexpr int TAB_W = SCREEN_WIDTH / TAB_COUNT;
 
 // Reserved strip at the top of Overview/Cells/Status for the pack indicator ("Gesamt" / "Pack X
-// von N" + swipe-hint chevrons) - Control has no per-pack concept and doesn't use it.
+// von N" + swipe-hint chevrons) - System has no per-pack concept and doesn't use it.
 constexpr int PACK_BAR_H = 16;
 constexpr int PAGE_TOP = CONTENT_TOP + PACK_BAR_H;
 constexpr int PAGE_H = CONTENT_BOTTOM - PAGE_TOP;
@@ -45,7 +44,7 @@ constexpr int PAGE_H = CONTENT_BOTTOM - PAGE_TOP;
 constexpr int SWIPE_THRESHOLD_PX = 32;
 constexpr int SWIPE_MAX_VERTICAL_PX = 60;
 
-enum class Page { Overview = 0, Cells = 1, Status = 2, Control = 3 };
+enum class Page { Overview = 0, Cells = 1, Status = 2, System = 3 };
 
 Page currentPage = Page::Overview;
 bool lastTouchedState = false;
@@ -61,16 +60,6 @@ bool swipeTracking = false;
 bool swipeConsumed = false;
 int16_t swipeStartX = 0;
 int16_t swipeStartY = 0;
-
-struct Rect {
-    int x, y, w, h;
-    bool contains(int px, int py) const { return px >= x && px < x + w && py >= y && py < y + h; }
-};
-
-Rect controlButtons[3];
-int controlButtonCount = 0;
-String controlToast;
-unsigned long controlToastUntilMs = 0;
 
 // ---- low-level drawing helpers -----------------------------------------------------------
 
@@ -165,7 +154,7 @@ void drawTabIcon(Page page, int cx, int cy, uint16_t color) {
             tft.fillRect(cx - 1, cy - 4, 2, 5, COLOR_BG);
             tft.fillRect(cx - 1, cy + 2, 2, 2, COLOR_BG);
             break;
-        case Page::Control:
+        case Page::System:
             tft.drawCircle(cx, cy, 7, color);
             tft.drawCircle(cx, cy, 2, color);
             for (int a = 0; a < 360; a += 45) {
@@ -212,7 +201,7 @@ void drawTopBar(const PaceBmsSnapshot& snapshot) {
 
 void drawTabBar() {
     tft.fillRect(0, SCREEN_HEIGHT - TAB_BAR_H, SCREEN_WIDTH, TAB_BAR_H, COLOR_CARD_ALT);
-    const char* labels[TAB_COUNT] = {"Uebersicht", "Zellen", "Status", "Steuerung"};
+    const char* labels[TAB_COUNT] = {"Uebersicht", "Zellen", "Status", "System"};
     for (int i = 0; i < TAB_COUNT; i++) {
         int x = i * TAB_W;
         int y = SCREEN_HEIGHT - TAB_BAR_H;
@@ -488,47 +477,51 @@ void drawStatus(const PaceBmsSnapshot& snapshot) {
     tft.drawString(buf, 6, y);
 }
 
-void drawControl() {
+void drawSystemInfo() {
     tft.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, CONTENT_H, COLOR_BG);
 
     tft.setTextDatum(TC_DATUM);
     tft.setTextFont(4);
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    tft.drawString("Steuerung", SCREEN_WIDTH / 2, CONTENT_TOP + 6);
+    tft.drawString("System", SCREEN_WIDTH / 2, CONTENT_TOP + 6);
 
-    tft.setTextDatum(TL_DATUM);
-    drawWrappedText(
-        "Noch nicht verfuegbar: das PACE-Protokoll fuer Schreibbefehle ist nicht "
-        "dokumentiert. Diese Flaechen sind fuer eine spaetere Erweiterung vorbereitet.",
-        10, CONTENT_TOP + 34, SCREEN_WIDTH - 20, 13, COLOR_TEXT_DIM, 1);
+    unsigned long upSec = millis() / 1000;
+    unsigned long upH = upSec / 3600;
+    unsigned long upM = (upSec % 3600) / 60;
+    unsigned long upS = upSec % 60;
 
-    const char* names[3] = {"Strombegrenzung", "FETs schalten", "Buzzer"};
-    int btnY = CONTENT_TOP + 92;
-    int btnH = 30;
-    int btnW = SCREEN_WIDTH - 20;
-    controlButtonCount = 3;
-    for (int i = 0; i < 3; i++) {
-        Rect r{10, btnY + i * (btnH + 8), btnW, btnH};
-        controlButtons[i] = r;
-        tft.fillRoundRect(r.x, r.y, r.w, r.h, 4, COLOR_DISABLED);
-        tft.setTextDatum(ML_DATUM);
-        tft.setTextFont(2);
-        tft.setTextColor(COLOR_DISABLED_TEXT, COLOR_DISABLED);
-        tft.drawString(names[i], r.x + 10, r.y + r.h / 2);
-        tft.setTextDatum(MR_DATUM);
-        tft.drawString("bald", r.x + r.w - 10, r.y + r.h / 2);
+    int x = 12;
+    int y = CONTENT_TOP + 38;
+    int w = SCREEN_WIDTH - 24;
+    int rowH = 24;
+    char buf[32];
+
+    snprintf(buf, sizeof(buf), "%luh %02lum %02lus", upH, upM, upS);
+    drawStatRow(x, y, w, rowH, "Laufzeit", buf, true);
+    y += rowH;
+
+    if (WiFi.status() == WL_CONNECTED) {
+        snprintf(buf, sizeof(buf), "%d dBm", WiFi.RSSI());
+    } else {
+        snprintf(buf, sizeof(buf), "--");
     }
-    tft.setTextDatum(TL_DATUM);
+    drawStatRow(x, y, w, rowH, "WLAN-Signal", buf, true);
+    y += rowH;
 
-    if (controlToast.length() > 0 && millis() < controlToastUntilMs) {
-        int ty = CONTENT_BOTTOM - 18;
-        tft.fillRect(0, ty, SCREEN_WIDTH, 18, COLOR_CARD_ALT);
-        tft.setTextDatum(MC_DATUM);
-        tft.setTextFont(1);
-        tft.setTextColor(COLOR_AMBER, COLOR_CARD_ALT);
-        tft.drawString(controlToast, SCREEN_WIDTH / 2, ty + 9);
-        tft.setTextDatum(TL_DATUM);
-    }
+    snprintf(buf, sizeof(buf), "%u KB", (unsigned)(ESP.getFreeHeap() / 1024));
+    drawStatRow(x, y, w, rowH, "Freier Speicher", buf, true);
+    y += rowH;
+
+    snprintf(buf, sizeof(buf), "%s Rev %d", ESP.getChipModel(), ESP.getChipRevision());
+    drawStatRow(x, y, w, rowH, "Chip", buf, true);
+    y += rowH;
+
+    snprintf(buf, sizeof(buf), "%u MHz", ESP.getCpuFreqMHz());
+    drawStatRow(x, y, w, rowH, "CPU-Takt", buf, true);
+    y += rowH;
+
+    snprintf(buf, sizeof(buf), "%u MB", (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)));
+    drawStatRow(x, y, w, rowH, "Flash", buf, false);
 }
 
 void draw(const PaceBmsSnapshot& snapshot) {
@@ -537,7 +530,7 @@ void draw(const PaceBmsSnapshot& snapshot) {
         case Page::Overview: drawOverview(snapshot); break;
         case Page::Cells: drawCells(snapshot); break;
         case Page::Status: drawStatus(snapshot); break;
-        case Page::Control: drawControl(); break;
+        case Page::System: drawSystemInfo(); break;
     }
     drawTabBar();
 }
@@ -556,15 +549,6 @@ bool handleTouch(int x, int y) {
         return false;
     }
 
-    if (currentPage == Page::Control) {
-        for (int i = 0; i < controlButtonCount; i++) {
-            if (controlButtons[i].contains(x, y)) {
-                controlToast = "Noch nicht verfuegbar";
-                controlToastUntilMs = millis() + 1500;
-                return true;
-            }
-        }
-    }
     return false;
 }
 
@@ -634,11 +618,6 @@ void update(const PaceBmsSnapshot& snapshot) {
         lastSeenUpdateMs = snapshot.lastUpdateMs;
         needRedraw = true;
     }
-    if (controlToast.length() > 0 && millis() >= controlToastUntilMs) {
-        controlToast = "";
-        needRedraw = true;
-    }
-
     unsigned long now = millis();
 
     if (needRedraw) {

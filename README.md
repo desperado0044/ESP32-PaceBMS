@@ -13,15 +13,19 @@ Kommandos) wurde von [Tertiush/bmspace](https://github.com/Tertiush/bmspace)
 
 ## Stand / Umfang
 
-- **Nur Lesen.** Das Referenzprojekt implementiert ausschließlich Auslese-Kommandos
+- **Nur Lesen, bewusst.** Implementiert sind ausschließlich Auslese-Kommandos
   (Version, Seriennummer, Zellspannungen/Temperaturen/Strom/Spannung, Kapazität,
-  Warn-/Schutz-/Balancing-Status). Es gibt aktuell **keine** Schreib-/Steuerbefehle
-  (z.B. Strombegrenzung setzen, FETs schalten) — dafür fehlt eine Dokumentation der
-  entsprechenden CID2-Codes. Die Architektur (`PaceBmsProtocol`/`PaceBmsClient`) ist
-  so aufgebaut, dass Schreibkommandos später ergänzt werden können.
+  Warn-/Schutz-/Balancing-Status). Das offizielle PACE-RS232-Protokoll definiert
+  zwar auch Schreib-/Steuerbefehle (u.a. Lade-/Entlade-MOSFET schalten, Buzzer,
+  Strombegrenzung-Gangwahl) — diese werden hier aus Sicherheitsgründen bewusst
+  **nicht** implementiert, da ein versehentlich geschaltetes MOSFET an einem
+  Akkupack ein echtes Risiko ist, kein reines Komfort-Feature.
 - Unterstützt mehrere parallelgeschaltete Packs (wie das Python-Original), sofern
   das BMS das meldet — Display, Web-UI und MQTT decken alle gemeldeten Packs ab
   (siehe „Pack-Erkennung & Verhalten bei Trennung" unten).
+- MQTT mit **Home-Assistant-Autoerkennung** (MQTT Discovery) — Sensoren erscheinen
+  automatisch in Home Assistant, keine manuelle YAML-Konfiguration nötig (siehe
+  „MQTT / Home Assistant" unten).
 
 ## Hardware
 
@@ -105,9 +109,7 @@ umschaltbar):
   Zell-Diff im Header.
 - **Status** — Warnungen im Klartext, Schutz-/FET-/Balancing-Zustände als Badges,
   Kapazitätswerte (Rest/Voll/Design).
-- **Steuerung** — Platzhalter für künftige Schreibbefehle (Strombegrenzung, FETs
-  schalten, Buzzer); Flächen sind vorbereitet, aber bewusst deaktiviert, solange
-  das Schreibprotokoll nicht dokumentiert ist (siehe oben).
+- **System** — Laufzeit, WLAN-Signal, freier Speicher, Chip/CPU/Flash-Info.
 
 Auf Übersicht/Zellen/Status zeigt eine kleine Leiste unter der Kopfzeile
 ("Gesamt" oder "Pack X von N" mit `‹ ›`-Wischhinweis), welches Pack gerade
@@ -223,8 +225,9 @@ Display bleibt währenddessen normal bedienbar.
 ## Web-Oberfläche
 
 Nach dem Verbinden läuft ein Webserver auf Port 80 mit Tabs analog zum Display
-(Übersicht/Zellen/Status/Steuerung, aktualisiert alle 5 Sekunden per
-`GET /api/data`, JSON) plus dem oben beschriebenen **Konfiguration**-Tab.
+(Übersicht/Zellen/Status, aktualisiert alle 5 Sekunden per `GET /api/data`,
+JSON; System per `GET /api/system`) plus dem oben beschriebenen
+**Konfiguration**-Tab.
 
 ## MQTT / Home Assistant
 
