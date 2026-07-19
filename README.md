@@ -161,13 +161,12 @@ umschaltbar):
 - **Status** — Warnungen im Klartext, Schutz-/FET-/Balancing-Zustände als Badges,
   Kapazitätswerte (Rest/Voll/Design).
 - **System** — Laufzeit, WLAN-Signal, freier Speicher (Chip-/CPU-/Flash-Details
-  stehen nur noch im Web-UI-System-Tab, hier bewusst weggelassen); darunter drei
-  große Buttons nebeneinander: **RS232/Modbus** (aktueller Zustand groß, die
-  Alternative klein in Klammern darunter), **Modbus-Konfig** (öffnet den
-  Vollbild-Screen zur Pack-Adressauswahl, siehe „Modbus RTU / RS485" oben) und
-  **Sim: AN/AUS** (gleiches Klammer-Prinzip). Ein **Neustart**-Button sitzt oben
-  rechts, bewusst weit von diesen drei Buttons getrennt, damit man die
-  Touch-Flächen nicht verwechselt.
+  stehen nur im Web-UI-System-Tab); darunter drei große Buttons nebeneinander:
+  **RS232/Modbus** (aktueller Zustand groß, die Alternative klein in Klammern
+  darunter), **Modbus-Konfig** (öffnet den Vollbild-Screen zur
+  Pack-Adressauswahl, siehe „Modbus RTU / RS485" oben) und **Sim: AN/AUS**
+  (gleiches Klammer-Prinzip). Ein **Neustart**-Button sitzt oben rechts,
+  räumlich getrennt von diesen drei Buttons.
 
 | Übersicht | Zellen |
 |---|---|
@@ -191,8 +190,7 @@ Auswahl gilt seitenübergreifend für alle drei Tabs.
 
 Nur die Kopfzeile wird sekündlich aktualisiert (kleiner, günstiger Redraw); der
 Rest der Seite zeichnet komplett nur neu, wenn sich wirklich etwas ändert (neue
-BMS-Daten, Tab-Wechsel, Pack-Wechsel, Kalibrierung) — ein voller Redraw im
-Sekundentakt hätte sichtbar geblitzt.
+BMS-Daten, Tab-Wechsel, Pack-Wechsel, Kalibrierung).
 
 ## Modbus RTU / RS485
 
@@ -281,8 +279,7 @@ startet neu. `SIMULATE_BMS_DATA` in `include/Config.h` ist nur der Startwert
 für die allererste Inbetriebnahme.
 
 **Wichtig:** Vor dem Anschluss eines echten BMS auf "AUS" umschalten - sonst
-werden dauerhaft Fake-Daten statt echter Messwerte angezeigt, ohne dass das
-offensichtlich wäre.
+werden dauerhaft Fake-Daten statt echter Messwerte angezeigt.
 
 ## Architektur: zwei Cores, damit das Display nie einfriert
 
@@ -296,15 +293,14 @@ Die Firmware läuft auf beiden ESP32-Kernen (FreeRTOS), bewusst getrennt:
   (500ms) auf eine Antwort, und das bis zu 5× pro Poll-Zyklus; ist gerade kein BMS
   angeschlossen/antwortend, addiert sich das auf über eine Sekunde Blockierung pro
   Zyklus. Läuft das auf demselben Core wie das Display, wirkt die Bedienung träge
-  bis eingefroren, obwohl das Display selbst nichts dafür kann.
+  bis eingefroren.
 
 Beide Seiten tauschen sich ausschließlich über `SnapshotStore` aus: ein Mutex-
 geschütztes Exemplar von `PaceBmsSnapshot`, das Core 0 nach jedem erfolgreichen
 Poll per `set()` veröffentlicht und Core 1 (und die Webserver-Handler, die in
 ESPAsyncWebServers eigenem AsyncTCP-Task laufen, also einem dritten Kontext) per
-`get()` als Kopie abholen. Ohne diesen Mutex wäre das Lesen/Schreiben der darin
-enthaltenen `String`-Felder aus mehreren Tasks gleichzeitig ein echtes Absturzrisiko,
-kein nur theoretisches.
+`get()` als Kopie abholen. Der Mutex schützt das gleichzeitige Lesen/Schreiben
+der darin enthaltenen `String`-Felder aus mehreren Tasks.
 
 ## WLAN & MQTT einrichten (keine Zugangsdaten im Code)
 
