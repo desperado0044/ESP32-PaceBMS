@@ -177,6 +177,10 @@ umschaltbar):
 |---|---|
 | ![Status-Tab](docs/images/display-status.jpg) | ![System-Tab](docs/images/display-system.jpg) |
 
+*Die `‹ Gesamt ›`-Leiste im Übersicht-Screenshot oben ist kein reiner Text -
+horizontales Wischen dort wechselt zwischen der Gesamt-Ansicht und den
+einzelnen Packs, siehe unten.*
+
 Auf Übersicht/Zellen/Status zeigt eine kleine Leiste unter der Kopfzeile
 ("Gesamt" oder "Pack X von N" mit `‹ ›`-Wischhinweis), welches Pack gerade
 angezeigt wird. Per **horizontalem Wischen** irgendwo im Inhaltsbereich wechselt
