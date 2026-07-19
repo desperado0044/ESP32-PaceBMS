@@ -32,7 +32,10 @@ void taskEntry(void* /*pvParameters*/) {
             WebUiServer::begin();
             servicesStarted = true;
         }
-        if (servicesStarted) MqttManager::loop();
+        if (servicesStarted) {
+            MqttManager::loop();
+            WebUiServer::loop();
+        }
 
         unsigned long now = millis();
         if (now - lastPollMs >= BMS_POLL_INTERVAL_MS) {

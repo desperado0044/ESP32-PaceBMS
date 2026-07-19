@@ -2,6 +2,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <ElegantOTA.h>
 #include "Config.h"
 #include "CredentialsStorage.h"
 #include "SnapshotStore.h"
@@ -387,7 +388,12 @@ void begin() {
     server.on("/api/config/wifi", HTTP_POST, handleSaveWifi);
     server.on("/api/config/mqtt", HTTP_POST, handleSaveMqtt);
 
+    ElegantOTA.begin(&server);
+    ElegantOTA.setAuth(OTA_HOSTNAME, OTA_PASSWORD);
+
     server.begin();
 }
+
+void loop() { ElegantOTA.loop(); }
 
 }  // namespace WebUiServer
