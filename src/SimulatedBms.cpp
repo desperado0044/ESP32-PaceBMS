@@ -94,6 +94,7 @@ void fillSimulatedSnapshot(PaceBmsSnapshot& snapshot) {
     snapshot.bmsSerial = "SIM0000000001";
     snapshot.packSerial = "SIMPACK000001";
     snapshot.packCount = kPackCount;
+    for (uint8_t i = 0; i < kPackCount; i++) snapshot.packAddress[i] = i + 1;
 
     // Slightly different SOC offset/phase per pack so the aggregate view and pack-switching are
     // visibly meaningful to test, not just 3 identical copies.

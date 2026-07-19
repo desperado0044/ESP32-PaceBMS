@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 
 // NVS-persisted settings the user can flip at runtime (display System tab / web Konfiguration),
 // as opposed to Config.h's compile-time constants. Falls back to the compile-time default the
@@ -16,5 +17,11 @@ void setSimulateBmsData(bool value);
 // Modbus RTU/RS485 (PaceModbusClient). Same "persist + caller reboots" pattern as above.
 bool useModbus();
 void setUseModbus(bool value);
+
+// Which Modbus slave addresses (1-15) are actually installed, as a bitmask: bit (n-1) set = address
+// n is queried. Set via the web UI's "Modbus-Konfiguration" section. Default: only address 1, so an
+// upgrade from the earlier single-pack-only Modbus build keeps working unchanged until reconfigured.
+uint16_t modbusPackAddressMask();
+void setModbusPackAddressMask(uint16_t mask);
 
 }  // namespace RuntimeSettings

@@ -289,6 +289,19 @@ const char kConfigHtml[] PROGMEM = R"HTML(
       <button type="submit">Anschluss speichern &amp; neu starten</button>
     </fieldset>
   </form>
+  <form method="POST" action="/api/config/modbus-packs">
+    <fieldset>
+      <legend>Modbus-Konfiguration</legend>
+      <p style="font-size:0.78rem;color:var(--dim);margin:0 0 0.4rem;">
+        Nur relevant, wenn oben Modbus RTU / RS485 ausgewaehlt ist: welche Pack-Adressen (per
+        Dip-Schalter am Pack eingestellt) sind tatsaechlich installiert?
+      </p>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.4rem;margin-top:0.3rem;">
+        %MODBUS_ADDRESS_CHECKBOXES%
+      </div>
+      <button type="submit">Adressen speichern &amp; neu starten</button>
+    </fieldset>
+  </form>
   <p><a class="back" href="/">&larr; Zurueck zum Dashboard</a></p>
 </main>
 </body>
@@ -324,7 +337,7 @@ String buildJson() {
         const PacePackAnalog& pack = s.packs[p];
         const PacePackWarn& warn = s.warn[p];
         JsonObject po = packs.add<JsonObject>();
-        po["index"] = p + 1;
+        po["index"] = s.packAddress[p];
         po["voltageV"] = pack.packVoltageV;
         po["currentA"] = pack.packCurrentA;
         po["socPercent"] = pack.socPercent;
@@ -424,12 +437,36 @@ void handleConfigPage(AsyncWebServerRequest* request) {
     bool modbus = RuntimeSettings::useModbus();
     html.replace("%PROTOCOL_RS232_CHECKED%", modbus ? "" : "checked");
     html.replace("%PROTOCOL_MODBUS_CHECKED%", modbus ? "checked" : "");
+
+    uint16_t mask = RuntimeSettings::modbusPackAddressMask();
+    String checkboxes;
+    for (uint8_t addr = 1; addr <= 15; addr++) {
+        bool checked = mask & (1u << (addr - 1));
+        checkboxes += "<label style=\"display:flex;align-items:center;gap:0.3rem;font-size:0.8rem;\">"
+                      "<input type=\"checkbox\" name=\"addr" + String(addr) + "\" " +
+                      (checked ? "checked" : "") + " style=\"width:auto;\"> " + String(addr) +
+                      "</label>";
+    }
+    html.replace("%MODBUS_ADDRESS_CHECKBOXES%", checkboxes);
+
     request->send(200, "text/html", html);
 }
 
 void handleSaveProtocol(AsyncWebServerRequest* request) {
     String protocol = paramOr(request, "protocol", "rs232");
     RuntimeSettings::setUseModbus(protocol == "modbus");
+
+    request->send(200, "text/html", kConfigSavedHtml);
+    delay(500);
+    ESP.restart();
+}
+
+void handleSaveModbusPacks(AsyncWebServerRequest* request) {
+    uint16_t mask = 0;
+    for (uint8_t addr = 1; addr <= 15; addr++) {
+        if (request->hasParam("addr" + String(addr), true)) mask |= (1u << (addr - 1));
+    }
+    RuntimeSettings::setModbusPackAddressMask(mask);
 
     request->send(200, "text/html", kConfigSavedHtml);
     delay(500);
@@ -482,6 +519,7 @@ void begin() {
     server.on("/api/config/wifi", HTTP_POST, handleSaveWifi);
     server.on("/api/config/mqtt", HTTP_POST, handleSaveMqtt);
     server.on("/api/config/protocol", HTTP_POST, handleSaveProtocol);
+    server.on("/api/config/modbus-packs", HTTP_POST, handleSaveModbusPacks);
 
     ElegantOTA.begin(&server);
     ElegantOTA.setAuth(OTA_HOSTNAME, OTA_PASSWORD);

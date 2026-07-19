@@ -91,9 +91,10 @@ void publishDiscovery(const PaceBmsSnapshot& snapshot) {
     if (!MQTT_HA_DISCOVERY_ENABLED) return;
     String deviceId = snapshot.bmsSerial.length() > 0 ? snapshot.bmsSerial : String(MQTT_CLIENT_ID);
 
-    for (uint8_t p = 1; p <= snapshot.packCount; p++) {
+    for (uint8_t idx = 0; idx < snapshot.packCount; idx++) {
+        uint8_t p = snapshot.packAddress[idx];
         String packPrefix = "pack_" + String(p);
-        const PacePackAnalog& pack = snapshot.packs[p - 1];
+        const PacePackAnalog& pack = snapshot.packs[idx];
 
         for (uint8_t i = 0; i < pack.cellCount; i++) {
             String suffix = packPrefix + "_v_cell_" + String(i + 1);
@@ -234,18 +235,19 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
     if (snapshot.bmsSerial.length() > 0) publish("bms_sn", snapshot.bmsSerial, true);
     if (snapshot.packSerial.length() > 0) publish("pack_sn", snapshot.packSerial, true);
 
-    for (uint8_t p = 1; p <= snapshot.packCount; p++) {
+    for (uint8_t idx = 0; idx < snapshot.packCount; idx++) {
+        uint8_t p = snapshot.packAddress[idx];
         String packPrefix = "pack_" + String(p);
-        const PacePackAnalog& pack = snapshot.packs[p - 1];
-        const PacePackWarn& warn = snapshot.warn[p - 1];
+        const PacePackAnalog& pack = snapshot.packs[idx];
+        const PacePackWarn& warn = snapshot.warn[idx];
 
-        if (pack.cellCount > maxCellsSeen[p - 1]) maxCellsSeen[p - 1] = pack.cellCount;
-        for (uint8_t i = 0; i < maxCellsSeen[p - 1]; i++) {
+        if (pack.cellCount > maxCellsSeen[idx]) maxCellsSeen[idx] = pack.cellCount;
+        for (uint8_t i = 0; i < maxCellsSeen[idx]; i++) {
             long mv = i < pack.cellCount ? (long)pack.cellMillivolts[i] : 0;
             publish(packPrefix + "/v_cells/cell_" + String(i + 1), mv);
         }
-        if (pack.tempCount > maxTempsSeen[p - 1]) maxTempsSeen[p - 1] = pack.tempCount;
-        for (uint8_t i = 0; i < maxTempsSeen[p - 1]; i++) {
+        if (pack.tempCount > maxTempsSeen[idx]) maxTempsSeen[idx] = pack.tempCount;
+        for (uint8_t i = 0; i < maxTempsSeen[idx]; i++) {
             float t = i < pack.tempCount ? pack.temperaturesC[i] : 0;
             publish(packPrefix + "/temps/temp_" + String(i + 1), t);
         }
