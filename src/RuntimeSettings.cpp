@@ -14,4 +14,8 @@ bool simulateBmsData() { return prefs.getBool("sim_bms", SIMULATE_BMS_DATA); }
 
 void setSimulateBmsData(bool value) { prefs.putBool("sim_bms", value); }
 
+bool useModbus() { return prefs.getBool("use_modbus", false); }
+
+void setUseModbus(bool value) { prefs.putBool("use_modbus", value); }
+
 }  // namespace RuntimeSettings

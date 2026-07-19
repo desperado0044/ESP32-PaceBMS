@@ -3,6 +3,7 @@
 #include <ESPmDNS.h>
 #include "Config.h"
 #include "PaceBmsClient.h"
+#include "PaceModbusClient.h"
 #include "WifiProvisioning.h"
 #include "MqttManager.h"
 #include "WebUiServer.h"
@@ -18,6 +19,7 @@ void taskEntry(void* /*pvParameters*/) {
     WifiManager::begin();
 
     PaceBmsClient bmsClient(Serial2, BMS_RESPONSE_TIMEOUT_MS);
+    PaceModbusClient modbusClient(Serial1, MODBUS_DE_RE_PIN, MODBUS_RESPONSE_TIMEOUT_MS);
     PaceBmsSnapshot workingSnapshot;  // mutated in place across polls, mirrored out via SnapshotStore
     unsigned long lastPollMs = 0;
     bool servicesStarted = false;
@@ -46,17 +48,26 @@ void taskEntry(void* /*pvParameters*/) {
         unsigned long now = millis();
         if (now - lastPollMs >= BMS_POLL_INTERVAL_MS) {
             lastPollMs = now;
+            bool useModbus = RuntimeSettings::useModbus();
+            bool pollOk;
+            const char* pollErr = "";
             if (RuntimeSettings::simulateBmsData()) {
                 SimulatedBms::fillSimulatedSnapshot(workingSnapshot);
-                consecutiveFailures = 0;
-                SnapshotStore::set(workingSnapshot);
-                if (servicesStarted) MqttManager::publishSnapshot(workingSnapshot);
-            } else if (bmsClient.poll(workingSnapshot)) {
+                pollOk = true;
+            } else if (useModbus) {
+                pollOk = modbusClient.poll(workingSnapshot);
+                pollErr = modbusClient.lastError().c_str();
+            } else {
+                pollOk = bmsClient.poll(workingSnapshot);
+                pollErr = bmsClient.lastError().c_str();
+            }
+
+            if (pollOk) {
                 consecutiveFailures = 0;
                 SnapshotStore::set(workingSnapshot);
                 if (servicesStarted) MqttManager::publishSnapshot(workingSnapshot);
             } else {
-                Serial.printf("BMS poll failed: %s\n", bmsClient.lastError().c_str());
+                Serial.printf("BMS poll failed (%s): %s\n", useModbus ? "Modbus" : "RS232", pollErr);
                 consecutiveFailures++;
                 if (consecutiveFailures == BMS_ZERO_AFTER_CONSECUTIVE_FAILURES) {
                     // BMS unresponsive for a while now - this counts as a definitive "disconnected"
