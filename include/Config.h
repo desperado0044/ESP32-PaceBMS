@@ -40,6 +40,13 @@ constexpr unsigned long CALIBRATION_LOCAL_TRIGGER_HOLD_MS = 10000UL;
 
 constexpr const char* CALIBRATION_NVS_NAMESPACE = "pacebms_calib";
 
+// Factory reset: holding the ESP32 board's BOOT/FLASH button (GPIO0, active low) this long clears
+// saved WiFi/MQTT credentials and touch calibration and reboots into the captive portal. Uses a
+// physical button rather than the touchscreen deliberately - it must still work even if the
+// screen isn't calibrated/usable, and it must not collide with the touch-hold calibration gesture.
+constexpr int FACTORY_RESET_BUTTON_PIN = 0;
+constexpr unsigned long FACTORY_RESET_HOLD_MS = 8000UL;
+
 // How often the BMS is polled for a full data set (version+serial once, then
 // analog/capacity/warning data every cycle) - matches the upstream default.
 constexpr unsigned long BMS_POLL_INTERVAL_MS = 5000;
