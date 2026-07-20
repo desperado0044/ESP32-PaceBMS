@@ -7,7 +7,7 @@
 // firmware (display/web/MQTT) doesn't need to know or care which transport is active. Uses the
 // register map from PACE-BMS-Modbus-Protocol-for-RS485-V1.3-20170627.pdf (registers 0-36 cover
 // everything but the version/serial number strings). Modbus has no "give me all packs" query like
-// RS232's CID2 0x42 - instead each physical pack is its own bus slave (dip-switch address 1-15), so
+// RS232's CID2 0x42 - instead each physical pack is its own bus slave (dip-switch address 0-15), so
 // multi-pack support here means polling whichever addresses RuntimeSettings::modbusPackAddressMask()
 // says are installed, one at a time, each with its own debounced zero-on-disconnect handling.
 class PaceModbusClient {

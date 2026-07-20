@@ -180,8 +180,8 @@ bool PaceModbusClient::poll(PaceBmsSnapshot& snapshot) {
     uint16_t mask = RuntimeSettings::modbusPackAddressMask();
     uint8_t index = 0;
 
-    for (uint8_t addr = 1; addr <= 15 && index < PACE_MAX_PACKS; addr++) {
-        if (!(mask & (1u << (addr - 1)))) continue;
+    for (uint8_t addr = 0; addr <= 15 && index < PACE_MAX_PACKS; addr++) {
+        if (!(mask & (1u << addr))) continue;
 
         const uint8_t* regs;
         size_t regCount;

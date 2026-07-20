@@ -450,8 +450,8 @@ void handleConfigPage(AsyncWebServerRequest* request) {
 
     uint16_t mask = RuntimeSettings::modbusPackAddressMask();
     String checkboxes;
-    for (uint8_t addr = 1; addr <= 15; addr++) {
-        bool checked = mask & (1u << (addr - 1));
+    for (uint8_t addr = 0; addr <= 15; addr++) {
+        bool checked = mask & (1u << addr);
         checkboxes += "<label style=\"display:flex;align-items:center;gap:0.3rem;font-size:0.8rem;\">"
                       "<input type=\"checkbox\" name=\"addr" + String(addr) + "\" " +
                       (checked ? "checked" : "") + " style=\"width:auto;\"> " + String(addr) +
@@ -483,8 +483,8 @@ void handleSavePollInterval(AsyncWebServerRequest* request) {
 
 void handleSaveModbusPacks(AsyncWebServerRequest* request) {
     uint16_t mask = 0;
-    for (uint8_t addr = 1; addr <= 15; addr++) {
-        if (request->hasParam("addr" + String(addr), true)) mask |= (1u << (addr - 1));
+    for (uint8_t addr = 0; addr <= 15; addr++) {
+        if (request->hasParam("addr" + String(addr), true)) mask |= (1u << addr);
     }
     RuntimeSettings::setModbusPackAddressMask(mask);
 
