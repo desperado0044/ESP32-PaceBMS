@@ -279,7 +279,11 @@ sich aber darin, woher die Pack-Anzahl/-Nummerierung kommt:
   mit Pack-Byte `FF` = alle Packs) beginnt mit einem 2-Zeichen-Hex-Feld, das
   die Pack-Anzahl angibt (`PaceBmsClient::readAnalogData()`); danach folgen
   die Werte für jedes gemeldete Pack der Reihe nach. Die Packnummer ist hier
-  einfach die fortlaufende Position (1, 2, 3, ...).
+  einfach die fortlaufende Position (1, 2, 3, ...) — **an echter Hardware
+  bestätigt**: ein per Dip-Schalter auf Adresse 0 gestelltes Pack wird vom
+  RS232-Master weiterhin mitgezählt (Anzahl blieb bei 3 Packs), die Position
+  in der Sammelantwort richtet sich aber nach der internen Auslesereihenfolge,
+  nicht nach der tatsächlichen Dip-Schalter-Adresse des einzelnen Packs.
 - **Modbus**: Die Pack-Anzahl kommt aus der manuell angehakten Adressliste
   (siehe „Modbus RTU / RS485" oben) — die Packnummer, die Display/Web-UI/MQTT
   anzeigen, ist hier die echte, konfigurierte Bus-Adresse.
