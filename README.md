@@ -296,6 +296,13 @@ praxisrelevante Punkte, die beim Einrichten leicht übersehen werden:
   nur für sich selbst, ein "Gesamt"-Wert über alle Packs kommt nicht vom
   BMS, sondern wird von dieser Firmware selbst aus den Einzelwerten
   berechnet (siehe Display-Oberfläche → Gesamt-Ansicht oben).
+  **Vorsicht, Beschriftung kann in die Irre führen**: manche BMS beschriften
+  diese rein interne Daisy-Chain-Buchse (2x, technisch eher ein "Battery
+  Link") schlicht mit **"RS485"**, obwohl der tatsächliche externe
+  RS485-Zugang für Modbus stattdessen als Hälfte des kombinierten
+  "CAN/RS485"-Ports (siehe oben) ausgeführt ist. Die Beschriftung allein
+  verrät also nicht zuverlässig, welche Buchse welche ist — im Zweifel
+  nachmessen/ausprobieren.
 - **Mehrpack-Verkabelung**: die Ketten-Durchschleifung zwischen den Packs
   (z.B. über die zweite RS485-Buchse jedes Packs) reicht nicht aus, um andere
   Packs per Modbus zu erreichen — beim Testen antwortete über diese Kette
