@@ -62,10 +62,11 @@ constexpr int SWIPE_MAX_VERTICAL_PX = 60;
 // rather than taking up a permanent 5th tab slot.
 constexpr int MB_GRID_COLS = 5;
 constexpr int MB_CHIP_W = 54;
-constexpr int MB_CHIP_H = 40;
+constexpr int MB_CHIP_H = 32;
 constexpr int MB_GAP_X = 8;
-constexpr int MB_GAP_Y = 10;
+constexpr int MB_GAP_Y = 8;
 constexpr int MB_GRID_TOP = 40;
+constexpr int MB_ADDR_COUNT = 16;  // dip-switch addresses 0-15
 constexpr int MB_GRID_LEFT =
     (SCREEN_WIDTH - (MB_GRID_COLS * MB_CHIP_W + (MB_GRID_COLS - 1) * MB_GAP_X)) / 2;
 constexpr int MB_BACK_X = 4, MB_BACK_Y = 4, MB_BACK_W = 70, MB_BACK_H = 22;
@@ -126,8 +127,8 @@ void modbusChipBounds(int index, int& cx, int& cy, int& cw, int& ch) {
 
 // Hit-testing uses the full column/row pitch (chip + gap), not just the visually drawn chip
 // rectangle - on a small resistive touchscreen the gap between chips is dead space that only makes
-// a dense 15-item grid harder to hit, not clearer to read, so a touch anywhere between two chips
-// resolves to whichever one it's closer to instead of missing both. Returns -1 for no hit.
+// a dense grid harder to hit, not clearer to read, so a touch anywhere between two chips resolves
+// to whichever one it's closer to instead of missing both. Returns -1 for no hit.
 int modbusChipIndexAt(int x, int y) {
     constexpr int colPitch = MB_CHIP_W + MB_GAP_X;
     constexpr int rowPitch = MB_CHIP_H + MB_GAP_Y;
@@ -137,10 +138,10 @@ int modbusChipIndexAt(int x, int y) {
     int col = relX / colPitch;
     int row = relY / rowPitch;
     if (col < 0 || col >= MB_GRID_COLS) return -1;
-    constexpr int rows = (15 + MB_GRID_COLS - 1) / MB_GRID_COLS;
+    constexpr int rows = (MB_ADDR_COUNT + MB_GRID_COLS - 1) / MB_GRID_COLS;
     if (row < 0 || row >= rows) return -1;
     int index = row * MB_GRID_COLS + col;
-    return index < 15 ? index : -1;
+    return index < MB_ADDR_COUNT ? index : -1;
 }
 
 // ---- low-level drawing helpers -----------------------------------------------------------
@@ -724,7 +725,7 @@ void drawModbusConfig() {
     tft.setTextColor(COLOR_TEXT, COLOR_BG);
     tft.drawString("Modbus Pack-Adressen", SCREEN_WIDTH / 2, MB_BACK_Y + 3);
 
-    for (int i = 0; i < 15; i++) {
+    for (int i = 0; i < MB_ADDR_COUNT; i++) {
         int cx, cy, cw, ch;
         modbusChipBounds(i, cx, cy, cw, ch);
         bool on = modbusConfigEditMask & (1u << i);
@@ -735,7 +736,7 @@ void drawModbusConfig() {
         tft.setTextDatum(MC_DATUM);
         tft.setTextFont(2);
         tft.setTextColor(fg, bg);
-        tft.drawString(String(i + 1), cx + cw / 2, cy + ch / 2);
+        tft.drawString(String(i), cx + cw / 2, cy + ch / 2);
     }
 
     tft.fillRoundRect(MB_SAVE_X, MB_SAVE_Y, MB_SAVE_W, MB_SAVE_H, 5, COLOR_ACCENT);

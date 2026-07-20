@@ -69,7 +69,7 @@ bestätigt: Greenrich U-P5000, Hubble Lithium (AM2, AM4, X-101), Revov R9, SOK 4
 
 ### BMS-UART (UART2)
 
-| ESP32 (UART2) | MAX3232      |
+| ESP32 (UART2) | MAX3232       |
 |---------------|---------------|
 | GPIO32 (TX2)  | T1IN          |
 | GPIO34 (RX2)  | R1OUT         |
@@ -79,8 +79,8 @@ bestätigt: Greenrich U-P5000, Hubble Lithium (AM2, AM4, X-101), Revov R9, SOK 4
 Bewusst **nicht** GPIO16/17 (Standard-UART2-Pins) — die sind durch das Display
 belegt (siehe unten). GPIO34 ist input-only, für reinen RX-Betrieb unproblematisch.
 
-| MAX3232 (RS232-Seite) | BMS RJ11 (Blick in die Buchse, Nase unten) |
-|------------------------|---------------------------------------------|
+| MAX3232 (RS232-Seite)  | BMS RJ11 (Blick in die Buchse, Nase unten)   |
+|------------------------|----------------------------------------------|
 | T1OUT                  | Pin 4 (BMS_Rx)                               |
 | R1IN                   | Pin 3 (BMS_Tx)                               |
 | GND                    | Pin 2 / Pin 5 (GND)                          |
@@ -89,6 +89,14 @@ UART-Parameter: **9600 Baud, 8N1** (siehe `include/Config.h`).
 
 Die genaue RJ11-Belegung kann je nach Marke/Modell abweichen — vor dem
 Anschließen mit einem Multimeter/Oszilloskop verifizieren.
+
+**Das Pack am RS232-Port muss per Dip-Schalter auf Adresse 1 stehen.** Laut
+offiziellem PACE-RS232-Protokolldokument gilt Adresse 1 als Master-Rolle im
+Master-Slave-Verbund: nur ein Pack mit Adresse 1 aggregiert und meldet die
+Daten aller Packs im Stack; jedes anders adressierte Pack antwortet nur für
+sich allein. Diese Firmware sendet immer ADR=1 (fest, nicht konfigurierbar,
+wie auch im Python-Referenzprojekt) — steht das physische Master-Pack auf
+einer anderen Adresse, bleibt die RS232-Antwort aus oder unvollständig.
 
 ### Modbus RTU / RS485 (alternativer Anschluss, UART1)
 
@@ -231,11 +239,13 @@ Modbus nicht gelesen.
 
 **Mehrpack-Betrieb:** Anders als RS232 (ein Befehl liefert alle Packs auf
 einmal) ist bei Modbus jedes physische Pack ein eigener Bus-Teilnehmer mit
-eigener Adresse (Dip-Schalter am Pack, 1-15). Welche Adressen tatsächlich
-verbaut sind, wird entweder im Konfiguration-Tab unter **„Modbus-Konfiguration"**
-(Web) oder direkt am Gerät über den "Modbus-Konfig"-Button im **System**-Tab
-angehakt (Checkboxen/Kacheln 1-15, gespeichert als Bitmaske, wirksam nach
-Neustart). Jeder Zyklus fragt genau die angehakten Adressen der Reihe nach ab; eine
+eigener Adresse (vier Dip-Schalter am Pack, Bereich **0-15** laut offiziellem
+PACE-RS232-Protokolldokument - derselbe Adressbereich gilt auch für Modbus).
+Welche Adressen tatsächlich verbaut sind, wird entweder im Konfiguration-Tab
+unter **„Modbus-Konfiguration"** (Web) oder direkt am Gerät über den
+"Modbus-Konfig"-Button im **System**-Tab angehakt (Checkboxen/Kacheln 0-15,
+gespeichert als Bitmaske, wirksam nach Neustart). Jeder Zyklus fragt genau die
+angehakten Adressen der Reihe nach ab; eine
 einzelne nicht antwortende Adresse wird — wie bei RS232 — erst nach
 `BMS_ZERO_AFTER_CONSECUTIVE_FAILURES` aufeinanderfolgenden Fehlversuchen
 einzeln auf 0 gesetzt, ohne die übrigen Packs zu beeinflussen. Adressen können
@@ -248,6 +258,13 @@ konsequent die echte Adresse als Packnummer an, nicht eine reine Zählnummer.
   bleiben also leer/aus.
 - Version/Seriennummer werden nicht ausgelesen (Anzeige zeigt "Modbus" statt
   einer echten Versionsnummer).
+- **Adresse 0 ist mit Vorsicht zu genießen**: Die Dip-Schalter-Tabelle im
+  offiziellen Dokument listet sie regulär, aber die Modbus-Funktionscode-
+  Tabelle im selben Dokument nennt als gültigen Slave-Adressbereich für
+  tatsächliche Leseanfragen `0x01-0x10` (1-16) — ohne die 0. Ob ein Pack mit
+  Adresse 0 vom RS232-Master mit-aggregiert bzw. per Modbus überhaupt
+  einzeln abfragbar ist, geht aus der Dokumentation nicht eindeutig hervor
+  und wurde nicht an echter Hardware verifiziert.
 
 Bisher **nicht an echter Hardware getestet** — nur der Protokoll-Code selbst
 (CRC16, Framing) wurde gegen die PDF-Spezifikation implementiert.

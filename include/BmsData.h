@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
-constexpr uint8_t PACE_MAX_PACKS = 15;
+constexpr uint8_t PACE_MAX_PACKS = 16;  // Modbus dip-switch addresses 0-15, 16 possible slots
 constexpr uint8_t PACE_MAX_CELLS = 24;
 constexpr uint8_t PACE_MAX_TEMPS = 8;
 

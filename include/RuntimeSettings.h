@@ -18,9 +18,11 @@ void setSimulateBmsData(bool value);
 bool useModbus();
 void setUseModbus(bool value);
 
-// Which Modbus slave addresses (1-15) are actually installed, as a bitmask: bit (n-1) set = address
-// n is queried. Set via the web UI's "Modbus-Konfiguration" section. Default: only address 1, so an
-// upgrade from the earlier single-pack-only Modbus build keeps working unchanged until reconfigured.
+// Which Modbus slave addresses (0-15, per the official PACE dip-switch table) are actually
+// installed, as a bitmask: bit N set = address N is queried. Set via the web UI's
+// "Modbus-Konfiguration" section. Default: only address 1, so an upgrade from the earlier
+// single-pack-only Modbus build keeps working unchanged until reconfigured. Address 0's behavior
+// is not clearly documented (see README) - included for completeness, not confirmed working.
 uint16_t modbusPackAddressMask();
 void setModbusPackAddressMask(uint16_t mask);
 
