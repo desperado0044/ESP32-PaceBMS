@@ -113,9 +113,19 @@ bei günstigen Modulen):
 | 3.3V          | VCC          |
 | GND           | GND          |
 
-Modul-Pins `A`/`B` zum RS485-Port des BMS (RJ45, siehe
-[syssi/esphome-pace-bms](https://github.com/syssi/esphome-pace-bms) für
-Pinbelegung/Farbcode). UART-Parameter: **9600 Baud, 8N1**.
+Modul-Pins `A`/`B` zum RS485-Port des BMS (RJ45):
+
+| RJ45-Pin (Blick in die Buchsenöffnung, Rastnase unten - Pin 1 links) | Funktion | T-568B-Farbe |
+|---|---|---|
+| 1 | B- | Orange-Weiß |
+| 2 | A+ | Orange |
+| 3 | GND | Grün-Weiß |
+
+Quelle: [syssi/esphome-pace-bms](https://github.com/syssi/esphome-pace-bms).
+Modul mit **3.3V versorgen, nicht 5V** — sonst passt der TTL-Pegel zwischen
+Modul und ESP32 nicht. UART-Parameter: **9600 Baud, 8N1**. Bei mehreren Packs
+am selben Bus: falls Modul/Packs per Jumper Abschlusswiderstände (120Ω)
+anbieten, an beiden physischen Bus-Enden aktivieren.
 
 ### Display + Touch (TFT_eSPI + XPT2046)
 
