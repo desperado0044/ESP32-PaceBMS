@@ -19,8 +19,8 @@ bool useModbus() { return prefs.getBool("use_modbus", false); }
 void setUseModbus(bool value) { prefs.putBool("use_modbus", value); }
 
 // Default: bit 1 set = address 1 only (bit N = address N now, not bit (N-1) as in the earlier
-// 1-15-only scheme - reinterpreting an already-saved mask from before this change would shift
-// every selected address down by one, but this is still prerelease software under active testing).
+// 1-15-only scheme - a mask saved before this change would be reinterpreted with every selected
+// address shifted down by one; re-save the Modbus pack addresses once after updating past this).
 uint16_t modbusPackAddressMask() { return prefs.getUShort("mb_addr_mask", 0x0002); }
 
 void setModbusPackAddressMask(uint16_t mask) { prefs.putUShort("mb_addr_mask", mask); }

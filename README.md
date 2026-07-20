@@ -1,10 +1,10 @@
 # ESP32 PaceBMS
 
-> **Vorabversion (Pre-Release).** Nachbau, Verdrahtung und Nutzung auf eigene
-> Gefahr - keine Garantie für Vollständigkeit, Richtigkeit oder Eignung für
-> einen bestimmten Zweck. Insbesondere der eigentliche BMS-Protokoll-Teil wurde
-> bisher **nicht gegen ein echtes PACE-BMS verifiziert** (siehe „Stand / Umfang"
-> unten) - vor produktivem Einsatz an einem echten Akkupack selbst prüfen.
+> Nachbau, Verdrahtung und Nutzung auf eigene Gefahr - keine Garantie für
+> Vollständigkeit, Richtigkeit oder Eignung für einen bestimmten Zweck. Der
+> Modbus/RS485-Pfad wurde ausführlich gegen ein echtes PACE-BMS (Mehrpack-
+> Stack) verifiziert (siehe „Stand / Umfang" unten); der RS232-Pfad wurde in
+> diesem Release-Stand nicht erneut an echter Hardware getestet.
 
 ESP32-Firmware zum Auslesen eines PACE-basierten BMS mit Web-Oberfläche und
 MQTT/Home-Assistant-Anbindung. Zwei wählbare Anschlussarten (Umschalter im
