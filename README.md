@@ -288,7 +288,14 @@ praxisrelevante Punkte, die beim Einrichten leicht übersehen werden:
   Buchse mit gemeinsamen Pins für beides. Nur die RS485-Seite liefert Modbus;
   am (davon unabhängigen) separaten reinen "RS485"-Anschluss (falls das BMS
   einen hat) läuft stattdessen ein proprietärer, ASCII-basierter interner
-  Pack-zu-Pack-Bus, kein Modbus.
+  Pack-zu-Pack-Bus, kein Modbus. Diese reinen RS485-Buchsen dienen
+  ausschließlich der Kommunikation der Packs untereinander (Master fragt
+  Slaves intern ab) — genau diese intern gesammelten Daten liefert der
+  Master dann über seinen RS232-Port als Stack-Aggregat nach außen. Eine
+  vergleichbare Aggregation gibt es bei Modbus nicht: jedes Pack antwortet
+  nur für sich selbst, ein "Gesamt"-Wert über alle Packs kommt nicht vom
+  BMS, sondern wird von dieser Firmware selbst aus den Einzelwerten
+  berechnet (siehe Display-Oberfläche → Gesamt-Ansicht oben).
 - **Mehrpack-Verkabelung**: die Ketten-Durchschleifung zwischen den Packs
   (z.B. über die zweite RS485-Buchse jedes Packs) reicht nicht aus, um andere
   Packs per Modbus zu erreichen — beim Testen antwortete über diese Kette
