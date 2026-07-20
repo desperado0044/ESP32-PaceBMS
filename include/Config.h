@@ -29,6 +29,16 @@ constexpr int SCREEN_WIDTH = 320;
 constexpr int SCREEN_HEIGHT = 240;
 constexpr int TFT_ROTATION = 1;  // landscape, panel mounted rotated 180 degrees
 
+// Buffers each full-page redraw (Overview/Cells/Status/System) in an off-screen sprite and pushes
+// the finished frame to the display in one shot, instead of clearing the screen and redrawing
+// element-by-element directly - avoids the ~100ms visible "blank flash" a direct clear+redraw
+// causes each time new BMS data arrives. Costs a ~77KB heap allocation (SCREEN_WIDTH x
+// SCREEN_HEIGHT x 1 byte, 8-bit/RGB332 sprite - the board's largest contiguous free heap block is
+// only ~110KB with no PSRAM, not enough for a 16-bit/~150KB sprite). Set to false to fall back to
+// the old direct-to-display drawing - BmsDisplayUi.cpp also falls back to it on its own if the
+// sprite allocation fails at boot.
+constexpr bool DISPLAY_USE_SPRITE_BUFFER = true;
+
 constexpr int TFT_BACKLIGHT_PIN = 22;
 constexpr int TFT_BACKLIGHT_LEDC_CHANNEL = 0;
 constexpr int TFT_BACKLIGHT_LEDC_FREQ_HZ = 5000;
@@ -60,7 +70,9 @@ constexpr int FACTORY_RESET_BUTTON_PIN = 0;
 constexpr unsigned long FACTORY_RESET_HOLD_MS = 8000UL;
 
 // How often the BMS is polled for a full data set (version+serial once, then
-// analog/capacity/warning data every cycle) - matches the upstream default.
+// analog/capacity/warning data every cycle) - matches the upstream default. Only the seed default
+// for RuntimeSettings::bmsPollIntervalMs() - configurable at runtime via the web Konfiguration tab,
+// takes effect immediately (no reboot needed, unlike most other runtime settings).
 constexpr unsigned long BMS_POLL_INTERVAL_MS = 5000;
 
 // After this many consecutive failed poll cycles (~this many * BMS_POLL_INTERVAL_MS), all known

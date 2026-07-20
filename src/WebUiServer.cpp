@@ -289,6 +289,15 @@ const char kConfigHtml[] PROGMEM = R"HTML(
       <button type="submit">Anschluss speichern &amp; neu starten</button>
     </fieldset>
   </form>
+  <form method="POST" action="/api/config/poll-interval">
+    <fieldset>
+      <legend>Abfrageintervall</legend>
+      <label>Wie oft das BMS abgefragt wird, in Sekunden
+        <input type="number" name="poll_sec" min="1" step="1" value="%POLL_INTERVAL_SEC%">
+      </label>
+      <button type="submit">Intervall speichern</button>
+    </fieldset>
+  </form>
   <form method="POST" action="/api/config/modbus-packs">
     <fieldset>
       <legend>Modbus-Konfiguration</legend>
@@ -437,6 +446,7 @@ void handleConfigPage(AsyncWebServerRequest* request) {
     bool modbus = RuntimeSettings::useModbus();
     html.replace("%PROTOCOL_RS232_CHECKED%", modbus ? "" : "checked");
     html.replace("%PROTOCOL_MODBUS_CHECKED%", modbus ? "checked" : "");
+    html.replace("%POLL_INTERVAL_SEC%", String(RuntimeSettings::bmsPollIntervalMs() / 1000));
 
     uint16_t mask = RuntimeSettings::modbusPackAddressMask();
     String checkboxes;
@@ -459,6 +469,16 @@ void handleSaveProtocol(AsyncWebServerRequest* request) {
     request->send(200, "text/html", kConfigSavedHtml);
     delay(500);
     ESP.restart();
+}
+
+// Unlike the other config saves, NetworkTask re-reads this every loop iteration rather than
+// caching it once at task start - no reboot needed, so this just redirects back to the
+// (now-updated) config page instead of showing the "restarting..." page.
+void handleSavePollInterval(AsyncWebServerRequest* request) {
+    int seconds = paramOr(request, "poll_sec", "5").toInt();
+    if (seconds < 1) seconds = 1;
+    RuntimeSettings::setBmsPollIntervalMs((unsigned long)seconds * 1000UL);
+    request->redirect("/konfiguration");
 }
 
 void handleSaveModbusPacks(AsyncWebServerRequest* request) {
@@ -519,6 +539,7 @@ void begin() {
     server.on("/api/config/wifi", HTTP_POST, handleSaveWifi);
     server.on("/api/config/mqtt", HTTP_POST, handleSaveMqtt);
     server.on("/api/config/protocol", HTTP_POST, handleSaveProtocol);
+    server.on("/api/config/poll-interval", HTTP_POST, handleSavePollInterval);
     server.on("/api/config/modbus-packs", HTTP_POST, handleSaveModbusPacks);
 
     ElegantOTA.begin(&server);

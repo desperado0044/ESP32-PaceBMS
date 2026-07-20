@@ -24,4 +24,10 @@ void setUseModbus(bool value);
 uint16_t modbusPackAddressMask();
 void setModbusPackAddressMask(uint16_t mask);
 
+// How often NetworkTask polls the BMS, in milliseconds. Unlike the settings above, NetworkTask
+// re-reads this every loop iteration rather than caching it once at task start, so a change here
+// takes effect on its very next poll check (well under a second) - no reboot needed.
+unsigned long bmsPollIntervalMs();
+void setBmsPollIntervalMs(unsigned long ms);
+
 }  // namespace RuntimeSettings

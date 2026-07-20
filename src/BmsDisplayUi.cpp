@@ -3,6 +3,7 @@
 #include "TouchCalibration.h"
 #include "WifiProvisioning.h"
 #include "RuntimeSettings.h"
+#include "BmsActivity.h"
 #include "Config.h"
 #include <WiFi.h>
 #include <math.h>
@@ -18,12 +19,23 @@ constexpr uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b) {
 constexpr uint16_t COLOR_BG = rgb565(12, 13, 18);
 constexpr uint16_t COLOR_CARD = rgb565(26, 28, 36);
 constexpr uint16_t COLOR_CARD_ALT = rgb565(20, 21, 28);
-constexpr uint16_t COLOR_ACCENT = rgb565(0, 200, 150);
-constexpr uint16_t COLOR_ACCENT_DIM = rgb565(0, 90, 75);
-constexpr uint16_t COLOR_AMBER = rgb565(235, 180, 40);
-constexpr uint16_t COLOR_WARN = rgb565(255, 99, 71);
-constexpr uint16_t COLOR_WARN_DIM = rgb565(80, 40, 36);
-constexpr uint16_t COLOR_OK = rgb565(90, 210, 130);
+// The six accent/semantic colors below are tuned against TFT_eSPI's actual 8bpp sprite encode/
+// decode round-trip (see DISPLAY_USE_SPRITE_BUFFER, Config.h) - not a naive "top 3/3/2 bits" RGB332
+// assumption, which turned out wrong: its 2-bit blue channel is a small non-linear lookup table
+// {0,11,21,31} with only 4 possible outputs (0/90/173/255 once expanded to 8-bit), and a mid-range
+// blue input (e.g. 64-176) can round back up to a much brighter value than expected, washing out
+// any colour that isn't itself blue-dominant. Verified by simulating the actual encode/decode bit
+// math for every candidate rather than by inspection. Each colour below deliberately lands its blue
+// component in the *bottom* bucket (0-48, decodes to 0) if it has no business being blue at all
+// (AMBER, WARN_DIM, ACCENT_DIM, OK), or the *top* bucket (192-255, decodes to 255) if it's supposed
+// to read as a saturated teal/cyan (ACCENT) - the two middle buckets are what caused the washed-out
+// look and are deliberately avoided everywhere.
+constexpr uint16_t COLOR_ACCENT = rgb565(0, 192, 224);
+constexpr uint16_t COLOR_ACCENT_DIM = rgb565(0, 96, 0);
+constexpr uint16_t COLOR_AMBER = rgb565(224, 192, 0);
+constexpr uint16_t COLOR_WARN = rgb565(255, 96, 64);
+constexpr uint16_t COLOR_WARN_DIM = rgb565(64, 32, 0);
+constexpr uint16_t COLOR_OK = rgb565(0, 224, 32);
 constexpr uint16_t COLOR_TEXT = 0xFFFF;
 constexpr uint16_t COLOR_TEXT_DIM = rgb565(140, 145, 160);
 constexpr uint16_t COLOR_DIVIDER = rgb565(42, 44, 52);
@@ -66,9 +78,18 @@ enum class Page { Overview = 0, Cells = 1, Status = 2, System = 3 };
 Page currentPage = Page::Overview;
 bool lastTouchedState = false;
 unsigned long lastDrawMs = 0;
-unsigned long lastTopBarMs = 0;
+unsigned long lastActivityDotMs = 0;
 unsigned long lastSeenUpdateMs = 0;
 bool everDrawn = false;
+
+// Off-screen frame buffer (see DISPLAY_USE_SPRITE_BUFFER in Config.h): a full redraw is composed
+// here first and pushed to the display in one shot, instead of clearing the real screen and
+// redrawing element-by-element directly on it (which left a visible blank flash between the two
+// steps). Sized to the whole screen, not just the content area, so every existing coordinate below
+// (all already expressed in absolute screen space) works unchanged whether gfx is the sprite or
+// the real tft. Falls back to drawing straight on tft if the allocation fails at boot.
+TFT_eSprite frameSprite = TFT_eSprite(&tft);
+bool spriteReady = false;
 
 // -1 = "Gesamt" (aggregate across all packs), 0..packCount-1 = a single pack. Shared across
 // Overview/Cells/Status so picking a pack on one carries over to the others.
@@ -123,12 +144,15 @@ int modbusChipIndexAt(int x, int y) {
 }
 
 // ---- low-level drawing helpers -----------------------------------------------------------
+// All take a `gfx` reference (either the real `tft` or `frameSprite`, both TFT_eSPI-derived and
+// sharing the same drawing API) so a full redraw can be composed off-screen and pushed in one
+// shot - see DISPLAY_USE_SPRITE_BUFFER above.
 
-void drawWrappedText(const String& text, int x, int y, int maxWidth, int lineHeight,
+void drawWrappedText(TFT_eSPI& gfx, const String& text, int x, int y, int maxWidth, int lineHeight,
                       uint16_t color, uint8_t font) {
-    tft.setTextFont(font);
-    tft.setTextColor(color, COLOR_BG);
-    tft.setTextDatum(TL_DATUM);
+    gfx.setTextFont(font);
+    gfx.setTextColor(color, COLOR_BG);
+    gfx.setTextDatum(TL_DATUM);
 
     int start = 0;
     int line = 0;
@@ -140,7 +164,7 @@ void drawWrappedText(const String& text, int x, int y, int maxWidth, int lineHei
         while (cursor < len) {
             if (text[cursor] == ' ') lastSpace = cursor;
             String candidate = text.substring(start, cursor + 1);
-            if (tft.textWidth(candidate) > maxWidth && cursor > start) {
+            if (gfx.textWidth(candidate) > maxWidth && cursor > start) {
                 end = (lastSpace > start) ? lastSpace : cursor;
                 break;
             }
@@ -149,87 +173,87 @@ void drawWrappedText(const String& text, int x, int y, int maxWidth, int lineHei
         }
         String lineText = text.substring(start, end);
         lineText.trim();
-        tft.drawString(lineText, x, y + line * lineHeight);
+        gfx.drawString(lineText, x, y + line * lineHeight);
         start = end;
         while (start < len && text[start] == ' ') start++;
         line++;
     }
 }
 
-void drawBatteryIcon(int x, int y, int w, int h, float socPercent) {
+void drawBatteryIcon(TFT_eSPI& gfx, int x, int y, int w, int h, float socPercent) {
     int nubW = w / 8;
     int nubH = h / 2;
     int bodyW = w - nubW - 2;
 
-    tft.drawRoundRect(x, y, bodyW, h, 4, COLOR_TEXT_DIM);
-    tft.fillRoundRect(x + bodyW + 2, y + (h - nubH) / 2, nubW, nubH, 2, COLOR_TEXT_DIM);
+    gfx.drawRoundRect(x, y, bodyW, h, 4, COLOR_TEXT_DIM);
+    gfx.fillRoundRect(x + bodyW + 2, y + (h - nubH) / 2, nubW, nubH, 2, COLOR_TEXT_DIM);
 
     int pad = 3;
     float clamped = socPercent < 0 ? 0 : (socPercent > 100 ? 100 : socPercent);
     int fillW = (int)((bodyW - 2 * pad) * (clamped / 100.0f));
     uint16_t fillColor = clamped > 60 ? COLOR_OK : (clamped > 25 ? COLOR_AMBER : COLOR_WARN);
-    if (fillW > 0) tft.fillRoundRect(x + pad, y + pad, fillW, h - 2 * pad, 2, fillColor);
+    if (fillW > 0) gfx.fillRoundRect(x + pad, y + pad, fillW, h - 2 * pad, 2, fillColor);
 }
 
 // Small triangular current-direction indicator: up = charging (current > 0), down = discharging.
-void drawCurrentArrow(int cx, int cy, float currentA) {
+void drawCurrentArrow(TFT_eSPI& gfx, int cx, int cy, float currentA) {
     if (fabsf(currentA) < 0.05f) return;
     uint16_t color = currentA > 0 ? COLOR_OK : COLOR_AMBER;
     if (currentA > 0) {
-        tft.fillTriangle(cx, cy - 6, cx - 6, cy + 5, cx + 6, cy + 5, color);
+        gfx.fillTriangle(cx, cy - 6, cx - 6, cy + 5, cx + 6, cy + 5, color);
     } else {
-        tft.fillTriangle(cx, cy + 6, cx - 6, cy - 5, cx + 6, cy - 5, color);
+        gfx.fillTriangle(cx, cy + 6, cx - 6, cy - 5, cx + 6, cy - 5, color);
     }
 }
 
-void drawStatRow(int x, int y, int w, int h, const char* label, const String& value,
+void drawStatRow(TFT_eSPI& gfx, int x, int y, int w, int h, const char* label, const String& value,
                   bool divider, uint8_t valueFont = 4) {
     // The label (always font 2) and value (font 2 or 4, caller's choice) only share a vertical
     // center when they're offset to match - the -8/+2 pair below was tuned for a font-4 value
     // sitting next to a font-2 label; when the value is font 2 too (System tab rows), both need
     // the same offset (0) or the label visibly sits higher than the value.
     int labelYOffset = valueFont >= 4 ? -8 : 0;
-    tft.setTextDatum(ML_DATUM);
-    tft.setTextFont(2);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
-    tft.drawString(label, x, y + h / 2 + labelYOffset);
+    gfx.setTextDatum(ML_DATUM);
+    gfx.setTextFont(2);
+    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
+    gfx.drawString(label, x, y + h / 2 + labelYOffset);
 
-    tft.setTextDatum(MR_DATUM);
-    tft.setTextFont(valueFont);
-    tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    tft.drawString(value, x + w, y + h / 2 + (valueFont >= 4 ? 2 : 0));
+    gfx.setTextDatum(MR_DATUM);
+    gfx.setTextFont(valueFont);
+    gfx.setTextColor(COLOR_TEXT, COLOR_BG);
+    gfx.drawString(value, x + w, y + h / 2 + (valueFont >= 4 ? 2 : 0));
 
-    if (divider) tft.drawFastHLine(x, y + h - 1, w, COLOR_DIVIDER);
-    tft.setTextDatum(TL_DATUM);
+    if (divider) gfx.drawFastHLine(x, y + h - 1, w, COLOR_DIVIDER);
+    gfx.setTextDatum(TL_DATUM);
 }
 
-void drawTabIcon(Page page, int cx, int cy, uint16_t color) {
+void drawTabIcon(TFT_eSPI& gfx, Page page, int cx, int cy, uint16_t color) {
     switch (page) {
         case Page::Overview:
-            tft.drawRoundRect(cx - 8, cy - 5, 14, 10, 2, color);
-            tft.fillRect(cx + 6, cy - 2, 2, 4, color);
-            tft.fillRect(cx - 6, cy - 3, 10, 6, color);
+            gfx.drawRoundRect(cx - 8, cy - 5, 14, 10, 2, color);
+            gfx.fillRect(cx + 6, cy - 2, 2, 4, color);
+            gfx.fillRect(cx - 6, cy - 3, 10, 6, color);
             break;
         case Page::Cells:
-            tft.fillRect(cx - 7, cy - 2, 3, 7, color);
-            tft.fillRect(cx - 2, cy - 6, 3, 11, color);
-            tft.fillRect(cx + 3, cy - 4, 3, 9, color);
+            gfx.fillRect(cx - 7, cy - 2, 3, 7, color);
+            gfx.fillRect(cx - 2, cy - 6, 3, 11, color);
+            gfx.fillRect(cx + 3, cy - 4, 3, 9, color);
             break;
         case Page::Status:
-            tft.fillTriangle(cx, cy - 7, cx - 7, cy + 5, cx + 7, cy + 5, color);
-            tft.fillRect(cx - 1, cy - 4, 2, 5, COLOR_BG);
-            tft.fillRect(cx - 1, cy + 2, 2, 2, COLOR_BG);
+            gfx.fillTriangle(cx, cy - 7, cx - 7, cy + 5, cx + 7, cy + 5, color);
+            gfx.fillRect(cx - 1, cy - 4, 2, 5, COLOR_BG);
+            gfx.fillRect(cx - 1, cy + 2, 2, 2, COLOR_BG);
             break;
         case Page::System:
-            tft.drawCircle(cx, cy, 7, color);
-            tft.drawCircle(cx, cy, 2, color);
+            gfx.drawCircle(cx, cy, 7, color);
+            gfx.drawCircle(cx, cy, 2, color);
             for (int a = 0; a < 360; a += 45) {
                 float rad = a * 3.14159f / 180.0f;
                 int x1 = cx + (int)(cosf(rad) * 8);
                 int y1 = cy + (int)(sinf(rad) * 8);
                 int x2 = cx + (int)(cosf(rad) * 11);
                 int y2 = cy + (int)(sinf(rad) * 11);
-                tft.drawLine(x1, y1, x2, y2, color);
+                gfx.drawLine(x1, y1, x2, y2, color);
             }
             break;
     }
@@ -237,58 +261,94 @@ void drawTabIcon(Page page, int cx, int cy, uint16_t color) {
 
 // ---- page drawing --------------------------------------------------------------------------
 
-// Redraws only the top bar (title, WiFi/IP status, freshness dot+age) - deliberately cheap so it
-// can run on a fast heartbeat without the full-screen clear+redraw flash a whole-page redraw would
-// cause every couple of seconds.
-void drawTopBar(const PaceBmsSnapshot& snapshot) {
-    tft.fillRect(0, 0, SCREEN_WIDTH, TOP_BAR_H, COLOR_CARD_ALT);
-    tft.setTextDatum(ML_DATUM);
-    tft.setTextFont(2);
-    tft.setTextColor(COLOR_TEXT, COLOR_CARD_ALT);
-    tft.drawString("PACE BMS", 8, TOP_BAR_H / 2);
+// Activity dot in the top-right corner - the only part of the top bar that changes on its own, so
+// it clears only its own small zone first, not the whole bar (that used to clear+redraw the entire
+// top bar every second just for this, which visibly flickered the static IP/WiFi text next to it
+// for no reason). Replaced the old numeric "age in seconds" readout with a colour that reflects
+// the actual request/response cycle instead, per user request - a number added nothing a glance at
+// the colour doesn't already say faster:
+//   grey    = idle, waiting for the next poll cycle (plain dot)
+//   red     = a request just went out, still waiting on a reply (plain dot)
+//   green   = a reply just came back, brief flash (plain dot)
+//   amber   = no reply in a long time - BMS not answering (WLAN down, pack disconnected, etc.) -
+//             drawn as a small warning triangle instead of a dot, so this one specifically doesn't
+//             read as just another colour among the other three (same shape language as the
+//             Status tab's icon, see drawTabIcon)
+constexpr int FRESH_ZONE_X = SCREEN_WIDTH - 24;
+constexpr int FRESH_ZONE_W = 24;
+constexpr unsigned long FRESH_FLASH_HOLD_MS = 300;
 
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextFont(1);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_CARD_ALT);
-    tft.drawString(WifiManager::statusText(), SCREEN_WIDTH / 2, 3);
+void drawFreshnessIndicator(TFT_eSPI& gfx) {
+    gfx.fillRect(FRESH_ZONE_X, 0, FRESH_ZONE_W, TOP_BAR_H, COLOR_CARD_ALT);
 
-    unsigned long ageMs = snapshot.valid ? (millis() - snapshot.lastUpdateMs) : 0xFFFFFFFF;
-    bool fresh = snapshot.valid && ageMs < (BMS_POLL_INTERVAL_MS * 3);
-    uint16_t dotColor = fresh ? COLOR_OK : COLOR_WARN;
+    unsigned long now = millis();
+    unsigned long reqMs = BmsActivity::lastRequestMs();
+    unsigned long respMs = BmsActivity::lastResponseMs();
+    unsigned long staleThresholdMs = RuntimeSettings::bmsPollIntervalMs() * 3;
 
-    String ageText = snapshot.valid ? (String(ageMs / 1000) + "s") : "--";
-    tft.setTextDatum(MR_DATUM);
-    tft.setTextFont(2);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_CARD_ALT);
-    tft.drawString(ageText, SCREEN_WIDTH - 14, TOP_BAR_H / 2);
-    tft.fillCircle(SCREEN_WIDTH - 6, TOP_BAR_H / 2, 4, dotColor);
-    tft.setTextDatum(TL_DATUM);
+    int cx = SCREEN_WIDTH - 12;
+    int cy = TOP_BAR_H / 2;
+
+    if (respMs == 0 || now - respMs > staleThresholdMs) {
+        gfx.fillTriangle(cx, cy - 6, cx - 6, cy + 5, cx + 6, cy + 5, COLOR_AMBER);
+        gfx.fillRect(cx - 1, cy - 3, 2, 4, COLOR_CARD_ALT);
+        gfx.fillRect(cx - 1, cy + 2, 2, 2, COLOR_CARD_ALT);
+        return;
+    }
+
+    uint16_t dotColor;
+    if (reqMs > respMs) {
+        dotColor = COLOR_WARN;
+    } else if (now - respMs < FRESH_FLASH_HOLD_MS) {
+        dotColor = COLOR_OK;
+    } else {
+        dotColor = COLOR_TEXT_DIM;
+    }
+
+    gfx.fillCircle(cx, cy, 4, dotColor);
 }
 
-void drawTabBar() {
-    tft.fillRect(0, SCREEN_HEIGHT - TAB_BAR_H, SCREEN_WIDTH, TAB_BAR_H, COLOR_CARD_ALT);
+// Full top bar (title, WiFi/IP status, activity dot) - only needed once per full page redraw, not
+// on the fast heartbeat (see drawFreshnessIndicator above for that).
+void drawTopBar(TFT_eSPI& gfx) {
+    gfx.fillRect(0, 0, SCREEN_WIDTH, TOP_BAR_H, COLOR_CARD_ALT);
+    gfx.setTextDatum(ML_DATUM);
+    gfx.setTextFont(2);
+    gfx.setTextColor(COLOR_TEXT, COLOR_CARD_ALT);
+    gfx.drawString("PACE BMS", 8, TOP_BAR_H / 2);
+
+    gfx.setTextDatum(TC_DATUM);
+    gfx.setTextFont(1);
+    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_CARD_ALT);
+    gfx.drawString(WifiManager::statusText(), SCREEN_WIDTH / 2, 3);
+
+    drawFreshnessIndicator(gfx);
+}
+
+void drawTabBar(TFT_eSPI& gfx) {
+    gfx.fillRect(0, SCREEN_HEIGHT - TAB_BAR_H, SCREEN_WIDTH, TAB_BAR_H, COLOR_CARD_ALT);
     const char* labels[TAB_COUNT] = {"Uebersicht", "Zellen", "Status", "System"};
     for (int i = 0; i < TAB_COUNT; i++) {
         int x = i * TAB_W;
         int y = SCREEN_HEIGHT - TAB_BAR_H;
         bool active = (int)currentPage == i;
         uint16_t color = active ? COLOR_ACCENT : COLOR_TEXT_DIM;
-        if (active) tft.drawFastHLine(x + 6, y, TAB_W - 12, COLOR_ACCENT);
-        drawTabIcon((Page)i, x + TAB_W / 2, y + 11, color);
-        tft.setTextDatum(TC_DATUM);
-        tft.setTextFont(1);
-        tft.setTextColor(color, COLOR_CARD_ALT);
-        tft.drawString(labels[i], x + TAB_W / 2, y + 21);
+        if (active) gfx.drawFastHLine(x + 6, y, TAB_W - 12, COLOR_ACCENT);
+        drawTabIcon(gfx, (Page)i, x + TAB_W / 2, y + 11, color);
+        gfx.setTextDatum(TC_DATUM);
+        gfx.setTextFont(1);
+        gfx.setTextColor(color, COLOR_CARD_ALT);
+        gfx.drawString(labels[i], x + TAB_W / 2, y + 21);
     }
-    tft.setTextDatum(TL_DATUM);
+    gfx.setTextDatum(TL_DATUM);
 }
 
-void drawEmptyState(const char* text) {
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextFont(2);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
-    tft.drawString(text, SCREEN_WIDTH / 2, CONTENT_TOP + CONTENT_H / 2);
-    tft.setTextDatum(TL_DATUM);
+void drawEmptyState(TFT_eSPI& gfx, const char* text) {
+    gfx.setTextDatum(MC_DATUM);
+    gfx.setTextFont(2);
+    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
+    gfx.drawString(text, SCREEN_WIDTH / 2, CONTENT_TOP + CONTENT_H / 2);
+    gfx.setTextDatum(TL_DATUM);
 }
 
 // Cycles selectedPack by dir (+1/-1) through Gesamt(-1) -> Pack 0 -> ... -> Pack packCount-1 ->
@@ -300,32 +360,32 @@ void advancePack(int dir, uint8_t packCount) {
     selectedPack = current - 1;
 }
 
-void drawPackBar(const PaceBmsSnapshot& snapshot) {
+void drawPackBar(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
     String label = selectedPack < 0 || selectedPack >= snapshot.packCount
                        ? "Gesamt"
                        : "Pack " + String(snapshot.packAddress[selectedPack]) + " von " +
                              String(snapshot.packCount);
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextFont(1);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
-    tft.drawString(label, SCREEN_WIDTH / 2, CONTENT_TOP + 4);
+    gfx.setTextDatum(TC_DATUM);
+    gfx.setTextFont(1);
+    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
+    gfx.drawString(label, SCREEN_WIDTH / 2, CONTENT_TOP + 4);
 
     // Small chevrons hinting that this bar (and the page below it) responds to a horizontal swipe.
     int cy = CONTENT_TOP + PACK_BAR_H / 2;
-    tft.drawLine(SCREEN_WIDTH / 2 - 46, cy - 4, SCREEN_WIDTH / 2 - 50, cy, COLOR_TEXT_DIM);
-    tft.drawLine(SCREEN_WIDTH / 2 - 50, cy, SCREEN_WIDTH / 2 - 46, cy + 4, COLOR_TEXT_DIM);
-    tft.drawLine(SCREEN_WIDTH / 2 + 46, cy - 4, SCREEN_WIDTH / 2 + 50, cy, COLOR_TEXT_DIM);
-    tft.drawLine(SCREEN_WIDTH / 2 + 50, cy, SCREEN_WIDTH / 2 + 46, cy + 4, COLOR_TEXT_DIM);
-    tft.setTextDatum(TL_DATUM);
+    gfx.drawLine(SCREEN_WIDTH / 2 - 46, cy - 4, SCREEN_WIDTH / 2 - 50, cy, COLOR_TEXT_DIM);
+    gfx.drawLine(SCREEN_WIDTH / 2 - 50, cy, SCREEN_WIDTH / 2 - 46, cy + 4, COLOR_TEXT_DIM);
+    gfx.drawLine(SCREEN_WIDTH / 2 + 46, cy - 4, SCREEN_WIDTH / 2 + 50, cy, COLOR_TEXT_DIM);
+    gfx.drawLine(SCREEN_WIDTH / 2 + 50, cy, SCREEN_WIDTH / 2 + 46, cy + 4, COLOR_TEXT_DIM);
+    gfx.setTextDatum(TL_DATUM);
 }
 
-void drawOverview(const PaceBmsSnapshot& snapshot) {
-    tft.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, CONTENT_H, COLOR_BG);
+void drawOverview(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
+    gfx.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, CONTENT_H, COLOR_BG);
     if (snapshot.packCount == 0) {
-        drawEmptyState("Keine Paketdaten");
+        drawEmptyState(gfx, "Keine Paketdaten");
         return;
     }
-    drawPackBar(snapshot);
+    drawPackBar(gfx, snapshot);
 
     bool aggregate = selectedPack < 0 || selectedPack >= snapshot.packCount;
     PacePackAnalog agg;
@@ -360,25 +420,27 @@ void drawOverview(const PaceBmsSnapshot& snapshot) {
     energyKwh = pack.packVoltageV * (pack.remainingCapacityMah / 1000.0f) / 1000.0f;  // V * Ah / 1000
 
     bool hasWarning = warnText.length() > 0;
-    int bannerH = hasWarning ? 22 : 0;
+    // Always reserved, whether or not a warning is currently showing - if this shrank/grew with
+    // hasWarning, every stat row would visibly jump size each time a warning appeared/disappeared.
+    constexpr int bannerH = 22;
     int mainH = PAGE_H - bannerH;
 
     // Left column: battery icon + big SOC readout.
     int leftW = 128;
     int iconY = PAGE_TOP + 14;
-    drawBatteryIcon(12, iconY, leftW - 24, 40, pack.socPercent);
+    drawBatteryIcon(gfx, 12, iconY, leftW - 24, 40, pack.socPercent);
 
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextFont(7);
-    tft.setTextColor(COLOR_TEXT, COLOR_BG);
+    gfx.setTextDatum(TC_DATUM);
+    gfx.setTextFont(7);
+    gfx.setTextColor(COLOR_TEXT, COLOR_BG);
     String socInt = String((int)(pack.socPercent + 0.5f));
-    tft.drawString(socInt, 12 + (leftW - 24) / 2 - 8, iconY + 54);
-    tft.setTextFont(4);
-    tft.setTextDatum(TL_DATUM);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
-    tft.drawString("%", 12 + (leftW - 24) / 2 + (socInt.length() >= 2 ? 44 : 26), iconY + 60);
+    gfx.drawString(socInt, 12 + (leftW - 24) / 2 - 8, iconY + 54);
+    gfx.setTextFont(4);
+    gfx.setTextDatum(TL_DATUM);
+    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
+    gfx.drawString("%", 12 + (leftW - 24) / 2 + (socInt.length() >= 2 ? 44 : 26), iconY + 60);
 
-    drawCurrentArrow(leftW - 4, iconY + 20, pack.packCurrentA);
+    drawCurrentArrow(gfx, leftW - 4, iconY + 20, pack.packCurrentA);
 
     // Right column: stat rows. Aggregate has no meaningful "Zyklen" (cycle counts don't sum
     // across packs), so it gets one fewer row than an individual pack's view.
@@ -390,60 +452,60 @@ void drawOverview(const PaceBmsSnapshot& snapshot) {
     int row = 0;
 
     snprintf(buf, sizeof(buf), "%.2f V", pack.packVoltageV);
-    drawStatRow(rightX, PAGE_TOP + row * rowH, rightW, rowH, aggregate ? "Bus-Spannung" : "Spannung",
-                buf, true);
+    drawStatRow(gfx, rightX, PAGE_TOP + row * rowH, rightW, rowH,
+                aggregate ? "Bus-Spannung" : "Spannung", buf, true);
     row++;
 
     snprintf(buf, sizeof(buf), "%+.2f A", pack.packCurrentA);
-    drawStatRow(rightX, PAGE_TOP + row * rowH, rightW, rowH, "Strom", buf, true);
+    drawStatRow(gfx, rightX, PAGE_TOP + row * rowH, rightW, rowH, "Strom", buf, true);
     row++;
 
     snprintf(buf, sizeof(buf), "%.0f %%", pack.sohPercent);
-    drawStatRow(rightX, PAGE_TOP + row * rowH, rightW, rowH, "SOH", buf, true);
+    drawStatRow(gfx, rightX, PAGE_TOP + row * rowH, rightW, rowH, "SOH", buf, true);
     row++;
 
     if (!aggregate) {
         snprintf(buf, sizeof(buf), "%u", pack.cycles);
-        drawStatRow(rightX, PAGE_TOP + row * rowH, rightW, rowH, "Zyklen", buf, true);
+        drawStatRow(gfx, rightX, PAGE_TOP + row * rowH, rightW, rowH, "Zyklen", buf, true);
         row++;
     }
 
     snprintf(buf, sizeof(buf), "%.2f kWh", energyKwh);
-    drawStatRow(rightX, PAGE_TOP + row * rowH, rightW, rowH, "Energie", buf, false);
+    drawStatRow(gfx, rightX, PAGE_TOP + row * rowH, rightW, rowH, "Energie", buf, false);
 
     if (hasWarning) {
         int by = CONTENT_BOTTOM - bannerH;
-        tft.fillRect(0, by, SCREEN_WIDTH, bannerH, COLOR_WARN_DIM);
-        tft.setTextDatum(ML_DATUM);
-        tft.setTextFont(2);
-        tft.setTextColor(COLOR_WARN, COLOR_WARN_DIM);
+        gfx.fillRect(0, by, SCREEN_WIDTH, bannerH, COLOR_WARN_DIM);
+        gfx.setTextDatum(ML_DATUM);
+        gfx.setTextFont(2);
+        gfx.setTextColor(COLOR_WARN, COLOR_WARN_DIM);
         String msg = warnText;
         if (msg.length() > 40) msg = msg.substring(0, 37) + "...";
-        tft.drawString(msg, 6, by + bannerH / 2);
-        tft.setTextDatum(TL_DATUM);
+        gfx.drawString(msg, 6, by + bannerH / 2);
+        gfx.setTextDatum(TL_DATUM);
     }
 }
 
-void drawCells(const PaceBmsSnapshot& snapshot) {
-    tft.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, CONTENT_H, COLOR_BG);
+void drawCells(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
+    gfx.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, CONTENT_H, COLOR_BG);
     if (snapshot.packCount == 0) {
-        drawEmptyState("Keine Zellendaten");
+        drawEmptyState(gfx, "Keine Zellendaten");
         return;
     }
-    drawPackBar(snapshot);
+    drawPackBar(gfx, snapshot);
     uint8_t idx = (selectedPack >= 0 && selectedPack < snapshot.packCount) ? selectedPack : 0;
     const PacePackAnalog& pack = snapshot.packs[idx];
     if (pack.cellCount == 0) {
-        drawEmptyState("Keine Zellendaten");
+        drawEmptyState(gfx, "Keine Zellendaten");
         return;
     }
 
-    tft.setTextDatum(TL_DATUM);
-    tft.setTextFont(2);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
+    gfx.setTextDatum(TL_DATUM);
+    gfx.setTextFont(2);
+    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
     char header[48];
     snprintf(header, sizeof(header), "%u Zellen  -  Diff %u mV", pack.cellCount, pack.cellMaxDiffMv);
-    tft.drawString(header, 6, PAGE_TOP + 4);
+    gfx.drawString(header, 6, PAGE_TOP + 4);
 
     uint16_t minMv = pack.cellMillivolts[0];
     uint16_t maxMv = pack.cellMillivolts[0];
@@ -473,85 +535,85 @@ void drawCells(const PaceBmsSnapshot& snapshot) {
         if (mv == maxMv && maxMv != minMv) accentColor = COLOR_ACCENT;
         if (mv == minMv && maxMv != minMv) accentColor = COLOR_WARN;
 
-        tft.fillRoundRect(x, y, w, h, 3, cardColor);
-        tft.drawRoundRect(x, y, w, h, 3, accentColor);
+        gfx.fillRoundRect(x, y, w, h, 3, cardColor);
+        gfx.drawRoundRect(x, y, w, h, 3, accentColor);
 
-        tft.setTextDatum(TC_DATUM);
-        tft.setTextFont(1);
-        tft.setTextColor(COLOR_TEXT_DIM, cardColor);
-        tft.drawString("Z" + String(i + 1), x + w / 2, y + 3);
+        gfx.setTextDatum(TC_DATUM);
+        gfx.setTextFont(1);
+        gfx.setTextColor(COLOR_TEXT_DIM, cardColor);
+        gfx.drawString("Z" + String(i + 1), x + w / 2, y + 3);
 
-        tft.setTextFont(2);
-        tft.setTextColor(COLOR_TEXT, cardColor);
-        tft.drawString(String(mv), x + w / 2, y + h / 2 + 1);
+        gfx.setTextFont(2);
+        gfx.setTextColor(COLOR_TEXT, cardColor);
+        gfx.drawString(String(mv), x + w / 2, y + h / 2 + 1);
     }
-    tft.setTextDatum(TL_DATUM);
+    gfx.setTextDatum(TL_DATUM);
 }
 
-void drawPill(int x, int y, int w, int h, const char* label, bool active) {
+void drawPill(TFT_eSPI& gfx, int x, int y, int w, int h, const char* label, bool active) {
     uint16_t bg = active ? COLOR_ACCENT_DIM : COLOR_CARD;
     uint16_t fg = active ? COLOR_OK : COLOR_TEXT_DIM;
-    tft.fillRoundRect(x, y, w, h, 4, bg);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextFont(2);
-    tft.setTextColor(fg, bg);
-    tft.drawString(label, x + w / 2, y + h / 2);
-    tft.setTextDatum(TL_DATUM);
+    gfx.fillRoundRect(x, y, w, h, 4, bg);
+    gfx.setTextDatum(MC_DATUM);
+    gfx.setTextFont(2);
+    gfx.setTextColor(fg, bg);
+    gfx.drawString(label, x + w / 2, y + h / 2);
+    gfx.setTextDatum(TL_DATUM);
 }
 
-void drawStatus(const PaceBmsSnapshot& snapshot) {
-    tft.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, CONTENT_H, COLOR_BG);
+void drawStatus(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
+    gfx.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, CONTENT_H, COLOR_BG);
     if (snapshot.packCount == 0) {
-        drawEmptyState("Keine Statusdaten");
+        drawEmptyState(gfx, "Keine Statusdaten");
         return;
     }
-    drawPackBar(snapshot);
+    drawPackBar(gfx, snapshot);
     uint8_t idx = (selectedPack >= 0 && selectedPack < snapshot.packCount) ? selectedPack : 0;
     const PacePackWarn& warn = snapshot.warn[idx];
     const PacePackAnalog& pack = snapshot.packs[idx];
 
     int y = PAGE_TOP + 4;
     if (warn.warnings.length() > 0) {
-        drawWrappedText(warn.warnings, 6, y, SCREEN_WIDTH - 12, 14, COLOR_WARN, 2);
+        drawWrappedText(gfx, warn.warnings, 6, y, SCREEN_WIDTH - 12, 14, COLOR_WARN, 2);
         y += 32;
     } else {
-        tft.setTextFont(2);
-        tft.setTextColor(COLOR_OK, COLOR_BG);
-        tft.drawString("Keine Warnungen", 6, y);
+        gfx.setTextFont(2);
+        gfx.setTextColor(COLOR_OK, COLOR_BG);
+        gfx.drawString("Keine Warnungen", 6, y);
         y += 18;
     }
 
-    tft.drawFastHLine(0, y, SCREEN_WIDTH, COLOR_DIVIDER);
+    gfx.drawFastHLine(0, y, SCREEN_WIDTH, COLOR_DIVIDER);
     y += 6;
 
     int pillW = (SCREEN_WIDTH - 18) / 3;
     int pillH = 26;
-    drawPill(6, y, pillW, pillH, "Laden", warn.chargeFetOn);
-    drawPill(6 + pillW + 3, y, pillW, pillH, "Entladen", warn.dischargeFetOn);
-    drawPill(6 + 2 * (pillW + 3), y, pillW, pillH, "Netzteil", warn.acInOn);
+    drawPill(gfx, 6, y, pillW, pillH, "Laden", warn.chargeFetOn);
+    drawPill(gfx, 6 + pillW + 3, y, pillW, pillH, "Entladen", warn.dischargeFetOn);
+    drawPill(gfx, 6 + 2 * (pillW + 3), y, pillW, pillH, "Netzteil", warn.acInOn);
     y += pillH + 4;
-    drawPill(6, y, pillW, pillH, "I-Limit", warn.currentLimitOn);
-    drawPill(6 + pillW + 3, y, pillW, pillH, "Balancing",
+    drawPill(gfx, 6, y, pillW, pillH, "I-Limit", warn.currentLimitOn);
+    drawPill(gfx, 6 + pillW + 3, y, pillW, pillH, "Balancing",
              warn.balanceState1 != 0 || warn.balanceState2 != 0);
-    drawPill(6 + 2 * (pillW + 3), y, pillW, pillH, "Vollgeladen", warn.fullyCharged);
+    drawPill(gfx, 6 + 2 * (pillW + 3), y, pillW, pillH, "Vollgeladen", warn.fullyCharged);
     y += pillH + 8;
 
-    tft.setTextFont(2);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
+    gfx.setTextFont(2);
+    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
     char buf[64];
     snprintf(buf, sizeof(buf), "Rest %lu mAh   Voll %lu mAh   Design %lu mAh",
              (unsigned long)pack.remainingCapacityMah, (unsigned long)pack.fullCapacityMah,
              (unsigned long)pack.designCapacityMah);
-    tft.drawString(buf, 6, y);
+    gfx.drawString(buf, 6, y);
 }
 
-void drawSystemInfo() {
-    tft.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, CONTENT_H, COLOR_BG);
+void drawSystemInfo(TFT_eSPI& gfx) {
+    gfx.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, CONTENT_H, COLOR_BG);
 
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextFont(4);
-    tft.setTextColor(COLOR_TEXT, COLOR_BG);
-    tft.drawString("System", SCREEN_WIDTH / 2, CONTENT_TOP + 6);
+    gfx.setTextDatum(TC_DATUM);
+    gfx.setTextFont(4);
+    gfx.setTextColor(COLOR_TEXT, COLOR_BG);
+    gfx.drawString("System", SCREEN_WIDTH / 2, CONTENT_TOP + 6);
 
     // Top-right, well away from the tappable rows below - two distinct touch targets that are
     // easy to tell apart, so one can't be hit by accident going for the other.
@@ -559,11 +621,11 @@ void drawSystemInfo() {
     rebootBtnH = 20;
     rebootBtnX = SCREEN_WIDTH - rebootBtnW - 8;
     rebootBtnY = CONTENT_TOP + 2;
-    tft.fillRoundRect(rebootBtnX, rebootBtnY, rebootBtnW, rebootBtnH, 4, COLOR_WARN_DIM);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextFont(1);
-    tft.setTextColor(COLOR_WARN, COLOR_WARN_DIM);
-    tft.drawString("Neustart", rebootBtnX + rebootBtnW / 2, rebootBtnY + rebootBtnH / 2);
+    gfx.fillRoundRect(rebootBtnX, rebootBtnY, rebootBtnW, rebootBtnH, 4, COLOR_WARN_DIM);
+    gfx.setTextDatum(MC_DATUM);
+    gfx.setTextFont(1);
+    gfx.setTextColor(COLOR_WARN, COLOR_WARN_DIM);
+    gfx.drawString("Neustart", rebootBtnX + rebootBtnW / 2, rebootBtnY + rebootBtnH / 2);
 
     unsigned long upSec = millis() / 1000;
     unsigned long upH = upSec / 3600;
@@ -577,7 +639,7 @@ void drawSystemInfo() {
     char buf[32];
 
     snprintf(buf, sizeof(buf), "%luh %02lum %02lus", upH, upM, upS);
-    drawStatRow(x, y, w, rowH, "Laufzeit", buf, true, 2);
+    drawStatRow(gfx, x, y, w, rowH, "Laufzeit", buf, true, 2);
     y += rowH;
 
     if (WiFi.status() == WL_CONNECTED) {
@@ -585,11 +647,11 @@ void drawSystemInfo() {
     } else {
         snprintf(buf, sizeof(buf), "--");
     }
-    drawStatRow(x, y, w, rowH, "WLAN-Signal", buf, true, 2);
+    drawStatRow(gfx, x, y, w, rowH, "WLAN-Signal", buf, true, 2);
     y += rowH;
 
     snprintf(buf, sizeof(buf), "%u KB", (unsigned)(ESP.getFreeHeap() / 1024));
-    drawStatRow(x, y, w, rowH, "Freier Speicher", buf, true, 2);
+    drawStatRow(gfx, x, y, w, rowH, "Freier Speicher", buf, true, 2);
     y += rowH;
 
     // Three real buttons side by side, not stacked list rows - a thin full-width row wedged
@@ -610,44 +672,46 @@ void drawSystemInfo() {
     protocolRowY = y;
     protocolRowW = btnW;
     protocolRowH = kBtnH;
-    tft.fillRoundRect(protocolRowX, y, btnW, kBtnH, 6, COLOR_CARD);
-    tft.drawRoundRect(protocolRowX, y, btnW, kBtnH, 6, COLOR_DIVIDER);
-    tft.setTextDatum(MC_DATUM);
-    tft.setTextFont(2);
-    tft.setTextColor(COLOR_TEXT, COLOR_CARD);
-    tft.drawString(useModbus ? "Modbus" : "RS232", protocolRowX + btnW / 2, y + kBtnH / 2 - 12);
-    tft.setTextFont(1);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_CARD);
-    tft.drawString(useModbus ? "(RS232)" : "(Modbus)", protocolRowX + btnW / 2, y + kBtnH / 2 + 14);
+    gfx.fillRoundRect(protocolRowX, y, btnW, kBtnH, 6, COLOR_CARD);
+    gfx.drawRoundRect(protocolRowX, y, btnW, kBtnH, 6, COLOR_DIVIDER);
+    gfx.setTextDatum(MC_DATUM);
+    gfx.setTextFont(2);
+    gfx.setTextColor(COLOR_TEXT, COLOR_CARD);
+    gfx.drawString(useModbus ? "Modbus" : "RS232", protocolRowX + btnW / 2, y + kBtnH / 2 - 12);
+    gfx.setTextFont(1);
+    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_CARD);
+    gfx.drawString(useModbus ? "(RS232)" : "(Modbus)", protocolRowX + btnW / 2, y + kBtnH / 2 + 14);
 
     modbusBtnRowX = protocolRowX + btnW + kBtnGap;
     modbusBtnRowY = y;
     modbusBtnRowW = btnW;
     modbusBtnRowH = kBtnH;
-    tft.fillRoundRect(modbusBtnRowX, y, btnW, kBtnH, 6, COLOR_ACCENT_DIM);
-    tft.drawRoundRect(modbusBtnRowX, y, btnW, kBtnH, 6, COLOR_ACCENT);
-    tft.setTextFont(2);
-    tft.setTextColor(COLOR_OK, COLOR_ACCENT_DIM);
-    tft.drawString("Modbus", modbusBtnRowX + btnW / 2, y + kBtnH / 2 - 12);
-    tft.setTextFont(1);
-    tft.drawString("Konfig", modbusBtnRowX + btnW / 2, y + kBtnH / 2 + 14);
+    gfx.fillRoundRect(modbusBtnRowX, y, btnW, kBtnH, 6, COLOR_ACCENT_DIM);
+    gfx.drawRoundRect(modbusBtnRowX, y, btnW, kBtnH, 6, COLOR_ACCENT);
+    gfx.setTextFont(2);
+    gfx.setTextColor(COLOR_OK, COLOR_ACCENT_DIM);
+    gfx.drawString("Modbus", modbusBtnRowX + btnW / 2, y + kBtnH / 2 - 12);
+    gfx.setTextFont(1);
+    gfx.drawString("Konfig", modbusBtnRowX + btnW / 2, y + kBtnH / 2 + 14);
 
     simRowX = modbusBtnRowX + btnW + kBtnGap;
     simRowY = y;
     simRowW = x + w - simRowX;  // fill remaining width exactly, absorbs any rounding remainder
     simRowH = kBtnH;
     bool simOn = RuntimeSettings::simulateBmsData();
-    tft.fillRoundRect(simRowX, y, simRowW, kBtnH, 6, COLOR_CARD);
-    tft.drawRoundRect(simRowX, y, simRowW, kBtnH, 6, COLOR_DIVIDER);
-    tft.setTextFont(2);
-    tft.setTextColor(COLOR_TEXT, COLOR_CARD);
-    tft.drawString(simOn ? "SIM: AN" : "SIM: AUS", simRowX + simRowW / 2, y + kBtnH / 2 - 12);
-    tft.setTextFont(1);
-    tft.setTextColor(COLOR_TEXT_DIM, COLOR_CARD);
-    tft.drawString(simOn ? "(AUS)" : "(AN)", simRowX + simRowW / 2, y + kBtnH / 2 + 14);
-    tft.setTextDatum(TC_DATUM);
+    gfx.fillRoundRect(simRowX, y, simRowW, kBtnH, 6, COLOR_CARD);
+    gfx.drawRoundRect(simRowX, y, simRowW, kBtnH, 6, COLOR_DIVIDER);
+    gfx.setTextFont(2);
+    gfx.setTextColor(COLOR_TEXT, COLOR_CARD);
+    gfx.drawString(simOn ? "SIM: AN" : "SIM: AUS", simRowX + simRowW / 2, y + kBtnH / 2 - 12);
+    gfx.setTextFont(1);
+    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_CARD);
+    gfx.drawString(simOn ? "(AUS)" : "(AN)", simRowX + simRowW / 2, y + kBtnH / 2 + 14);
+    gfx.setTextDatum(TC_DATUM);
 }
 
+// Not sprite-buffered (draws straight to tft) - a rarely-used setup screen, not the periodic
+// redraw the sprite buffer was added for.
 void drawModbusConfig() {
     tft.fillScreen(COLOR_BG);
 
@@ -687,14 +751,17 @@ void draw(const PaceBmsSnapshot& snapshot) {
         drawModbusConfig();
         return;
     }
-    drawTopBar(snapshot);
+
+    TFT_eSPI& gfx = spriteReady ? static_cast<TFT_eSPI&>(frameSprite) : tft;
+    drawTopBar(gfx);
     switch (currentPage) {
-        case Page::Overview: drawOverview(snapshot); break;
-        case Page::Cells: drawCells(snapshot); break;
-        case Page::Status: drawStatus(snapshot); break;
-        case Page::System: drawSystemInfo(); break;
+        case Page::Overview: drawOverview(gfx, snapshot); break;
+        case Page::Cells: drawCells(gfx, snapshot); break;
+        case Page::Status: drawStatus(gfx, snapshot); break;
+        case Page::System: drawSystemInfo(gfx); break;
     }
-    drawTabBar();
+    drawTabBar(gfx);
+    if (spriteReady) frameSprite.pushSprite(0, 0);
 }
 
 // Returns true if handling the touch requires a redraw.
@@ -840,6 +907,18 @@ bool handleSwipeTracking(bool touchedNow, bool risingEdge, int16_t tx, int16_t t
 
 void begin() {
     tft.fillScreen(COLOR_BG);
+
+    if (DISPLAY_USE_SPRITE_BUFFER) {
+        // 8-bit (RGB332) rather than 16-bit: the largest contiguous free heap block on this board
+        // (no PSRAM, ~110KB in practice) isn't enough for a 16-bit full-screen sprite (~150KB), but
+        // comfortably fits an 8-bit one (~77KB). Coordinates are unaffected either way - only the
+        // per-pixel storage shrinks - so this needed no other code changes.
+        frameSprite.setColorDepth(8);
+        spriteReady = frameSprite.createSprite(SCREEN_WIDTH, SCREEN_HEIGHT) != nullptr;
+        if (!spriteReady) {
+            Serial.println("Display: Sprite-Puffer konnte nicht angelegt werden, zeichne direkt");
+        }
+    }
 }
 
 void update(const PaceBmsSnapshot& snapshot) {
@@ -863,15 +942,17 @@ void update(const PaceBmsSnapshot& snapshot) {
     if (needRedraw) {
         draw(snapshot);
         lastDrawMs = now;
-        lastTopBarMs = now;
+        lastActivityDotMs = now;
         everDrawn = true;
-    } else if (!modbusConfigOpen && now - lastTopBarMs > 1000) {
-        // Keeps the age readout / WiFi status / freshness dot live without the full-screen
-        // clear+redraw a whole-page refresh would cause (that was visible as a flash every couple
-        // of seconds) - the top bar alone is a small, cheap redraw. The Modbus config overlay has
-        // no top bar at all, so it must never fire here while that's open.
-        drawTopBar(snapshot);
-        lastTopBarMs = now;
+    } else if (!modbusConfigOpen && now - lastActivityDotMs > 150) {
+        // Keeps the request/response activity dot live without composing/pushing a full frame or
+        // touching the static title/WiFi-status text next to it. A short interval (not the ~1s the
+        // old age-in-seconds readout used) matters here - a BMS that answers quickly might only be
+        // "sending" (red) for a few tens of ms, and a coarser heartbeat could miss ever rendering
+        // that colour at all. The Modbus config overlay has no top bar at all, so this must never
+        // fire while that's open.
+        drawFreshnessIndicator(tft);
+        lastActivityDotMs = now;
     }
 }
 

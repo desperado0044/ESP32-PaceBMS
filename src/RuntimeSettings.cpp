@@ -22,4 +22,8 @@ uint16_t modbusPackAddressMask() { return prefs.getUShort("mb_addr_mask", 0x0001
 
 void setModbusPackAddressMask(uint16_t mask) { prefs.putUShort("mb_addr_mask", mask); }
 
+unsigned long bmsPollIntervalMs() { return prefs.getULong("poll_ms", BMS_POLL_INTERVAL_MS); }
+
+void setBmsPollIntervalMs(unsigned long ms) { prefs.putULong("poll_ms", ms); }
+
 }  // namespace RuntimeSettings
