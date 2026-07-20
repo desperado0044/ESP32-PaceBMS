@@ -10,6 +10,7 @@
 #include "SnapshotStore.h"
 #include "SimulatedBms.h"
 #include "RuntimeSettings.h"
+#include "BmsActivity.h"
 
 namespace NetworkTask {
 
@@ -46,8 +47,9 @@ void taskEntry(void* /*pvParameters*/) {
         }
 
         unsigned long now = millis();
-        if (now - lastPollMs >= BMS_POLL_INTERVAL_MS) {
+        if (now - lastPollMs >= RuntimeSettings::bmsPollIntervalMs()) {
             lastPollMs = now;
+            BmsActivity::markRequestSent();
             bool useModbus = RuntimeSettings::useModbus();
             bool pollOk;
             const char* pollErr = "";
@@ -63,6 +65,7 @@ void taskEntry(void* /*pvParameters*/) {
             }
 
             if (pollOk) {
+                BmsActivity::markResponseReceived();
                 consecutiveFailures = 0;
                 SnapshotStore::set(workingSnapshot);
                 if (servicesStarted) MqttManager::publishSnapshot(workingSnapshot);

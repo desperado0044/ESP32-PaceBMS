@@ -149,8 +149,12 @@ die Touch-Kalibrierung selbst kaputt sind, und damit er nicht mit der
 ## Display-Oberfläche
 
 Kopfzeile: Titel, WLAN-Status (IP-Adresse, oder `Setup 10.0.0.1` solange das
-Einrichtungsportal offen ist, oder `Verbinde...`), Frische-Punkt + Alter der
-letzten BMS-Antwort. Darunter vier Tabs am unteren Bildschirmrand (per Touch
+Einrichtungsportal offen ist, oder `Verbinde...`), rechts ein Aktivitätspunkt
+für den BMS-Abfragezyklus statt einer reinen Sekundenzahl: **grau** (Ruhe
+zwischen zwei Abfragen), **rot** (Anfrage raus, wartet auf Antwort), **grün**
+(Antwort angekommen, kurzes Aufblitzen), oder ein **gelbes Warndreieck** (seit
+deutlich länger als einem Zyklus keine Antwort mehr — WLAN weg, Pack
+getrennt, o.ä.). Darunter vier Tabs am unteren Bildschirmrand (per Touch
 umschaltbar):
 
 - **Übersicht** — Batteriesymbol + SOC groß, Lade-/Entladepfeil, Spannung, Strom,
@@ -188,9 +192,29 @@ alle Packs summiert, Spannung gemittelt — Zyklen entfällt dort, da sich
 Zyklenzahlen nicht sinnvoll summieren lassen) und den einzelnen Packs; die
 Auswahl gilt seitenübergreifend für alle drei Tabs.
 
-Nur die Kopfzeile wird sekündlich aktualisiert (kleiner, günstiger Redraw); der
-Rest der Seite zeichnet komplett nur neu, wenn sich wirklich etwas ändert (neue
-BMS-Daten, Tab-Wechsel, Pack-Wechsel, Kalibrierung).
+Nur der Aktivitätspunkt aktualisiert sich alle 150ms eigenständig (kleinste
+mögliche Fläche, Rest der Kopfzeile bleibt unberührt); der übrige Seiteninhalt
+zeichnet komplett nur neu, wenn sich wirklich etwas ändert (neue BMS-Daten,
+Tab-Wechsel, Pack-Wechsel, Kalibrierung). Ein solcher voller Redraw wird dabei
+zunächst unsichtbar in einem Sprite-Puffer (`TFT_eSprite`, Bildschirmgröße
+320×240) zusammengesetzt und erst fertig in einem Zug aufs Display übertragen,
+statt den Bildschirm direkt zu löschen und Element für Element neu zu
+zeichnen — Letzteres verursachte ein kurzes, aber deutlich sichtbares
+Aufblitzen bei jeder Aktualisierung. Der Puffer läuft in 8-Bit-Farbtiefe
+(RGB332, ~77KB Heap) statt 16-Bit (~150KB), da der größte zusammenhängende
+freie Speicherblock auf diesem Board (kein PSRAM) für 16-Bit nicht ausreicht;
+schlägt die Allokation dennoch fehl, fällt die Firmware automatisch auf
+direktes Zeichnen zurück (`DISPLAY_USE_SPRITE_BUFFER` in `Config.h` schaltet
+das Verfahren auch manuell ab). Die sechs Akzentfarben in `BmsDisplayUi.cpp`
+sind bewusst auf Werte abgestimmt, die diese 8-Bit-Rundung ohne sichtbaren
+Farbstich überstehen. Die Warnbanner-Fläche auf der Übersicht ist außerdem
+immer reserviert, unabhängig davon, ob gerade eine Warnung ansteht — sonst
+würden die Statuszeilen bei jedem Erscheinen/Verschwinden einer Warnung
+sichtbar springen.
+
+Das Abfrageintervall (Standard 5s) lässt sich im **Konfiguration**-Tab der
+Weboberfläche ändern (Sekunden-Eingabefeld) — wirkt sofort, ohne Neustart,
+anders als die übrigen Einstellungen dort.
 
 ## Modbus RTU / RS485
 
@@ -328,8 +352,8 @@ Display bleibt währenddessen normal bedienbar.
 ## Bauen & Flashen
 
 1. PlatformIO installieren (CLI oder VS-Code-Extension).
-2. Bei Bedarf `include/Config.h` anpassen (Pins, Poll-Intervall, MQTT-Basistopic,
-   HA-Discovery an/aus, AP-Name/IP der Einrichtung).
+2. Bei Bedarf `include/Config.h` anpassen (Pins, Standard-Poll-Intervall,
+   MQTT-Basistopic, HA-Discovery an/aus, AP-Name/IP der Einrichtung).
 3. Bauen und flashen:
    ```
    pio run
@@ -394,7 +418,11 @@ User/Passwort werden wie oben beschrieben eingerichtet, nicht im Code.
 - `include/SimulatedBms.h`, `src/SimulatedBms.cpp` — Fake-Datengenerator für den
   Simulationsmodus (siehe oben).
 - `include/RuntimeSettings.h`, `src/RuntimeSettings.cpp` — NVS-persistierte
-  Laufzeit-Einstellungen (Simulationsmodus, BMS-Anschlussart RS232/Modbus).
+  Laufzeit-Einstellungen (Simulationsmodus, BMS-Anschlussart RS232/Modbus,
+  Modbus-Pack-Adressen, Poll-Intervall).
+- `include/BmsActivity.h`, `src/BmsActivity.cpp` — Zeitstempel für den letzten
+  Abfrage-/Antwort-Zeitpunkt, Core-übergreifend gelesen vom Aktivitätspunkt in
+  der Display-Kopfzeile (siehe „Display-Oberfläche" oben).
 - `include/FactoryReset.h`, `src/FactoryReset.cpp` — Werksreset über den
   BOOT/FLASH-Button (siehe oben).
 - `src/main.cpp` — Core-1-Einstiegspunkt: nur Display-Setup + Display-Loop.
