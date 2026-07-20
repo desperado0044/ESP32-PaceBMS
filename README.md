@@ -35,6 +35,10 @@ Konfiguration-Tab):
   „MQTT / Home Assistant" unten).
 - **Zwei BMS-Anschlussarten** (RS232 oder Modbus RTU/RS485), umschaltbar über den
   Konfiguration-Tab, ohne Neu-Flashen — siehe „Modbus RTU / RS485" unten.
+  Dieser Release-Stand wurde ausführlich gegen echte Modbus/RS485-Hardware
+  getestet; der RS232-Pfad selbst wurde dabei **nicht erneut** an echter
+  Hardware verifiziert (Code unverändert gegenüber dem letzten getesteten
+  Stand).
 
 ## Kompatible Geräte (ungetestet)
 
@@ -109,7 +113,7 @@ bei günstigen Modulen):
 |---------------|--------------|
 | GPIO26 (TX)   | DI           |
 | GPIO25 (RX)   | RO           |
-| GPIO13        | DE + RE (verbunden) |
+| GPIO5         | DE + RE (verbunden) |
 | 3.3V          | VCC          |
 | GND           | GND          |
 
@@ -125,7 +129,8 @@ Quelle: [syssi/esphome-pace-bms](https://github.com/syssi/esphome-pace-bms).
 Modul mit **3.3V versorgen, nicht 5V** — sonst passt der TTL-Pegel zwischen
 Modul und ESP32 nicht. UART-Parameter: **9600 Baud, 8N1**. Bei mehreren Packs
 am selben Bus: falls Modul/Packs per Jumper Abschlusswiderstände (120Ω)
-anbieten, an beiden physischen Bus-Enden aktivieren.
+anbieten, an beiden physischen Bus-Enden aktivieren — siehe „Modbus RTU /
+RS485" weiter unten für die tatsächlich nötige Mehrpack-Verkabelung.
 
 ### Display + Touch (TFT_eSPI + XPT2046)
 
@@ -271,13 +276,30 @@ konsequent die echte Adresse als Packnummer an, nicht eine reine Zählnummer.
 - **Adresse 0 ist mit Vorsicht zu genießen**: Die Dip-Schalter-Tabelle im
   offiziellen Dokument listet sie regulär, aber die Modbus-Funktionscode-
   Tabelle im selben Dokument nennt als gültigen Slave-Adressbereich für
-  tatsächliche Leseanfragen `0x01-0x10` (1-16) — ohne die 0. Ob ein Pack mit
-  Adresse 0 vom RS232-Master mit-aggregiert bzw. per Modbus überhaupt
-  einzeln abfragbar ist, geht aus der Dokumentation nicht eindeutig hervor
-  und wurde nicht an echter Hardware verifiziert.
+  tatsächliche Leseanfragen `0x01-0x10` (1-16) — ohne die 0.
 
-Bisher **nicht an echter Hardware getestet** — nur der Protokoll-Code selbst
-(CRC16, Framing) wurde gegen die PDF-Spezifikation implementiert.
+**An echter Hardware getestet und bestätigt funktionsfähig** (mehrere Packs
+gleichzeitig, reale Zell-/Spannungs-/Strom-/Kapazitätswerte). Zwei
+praxisrelevante Punkte, die beim Einrichten leicht übersehen werden:
+
+- **Physischer Port**: das BMS hat oft *zwei* äußerlich als "CAN/RS485"
+  zusammengefasste, aber elektrisch komplett getrennte Buchsen nebeneinander
+  (z.B. rechte Buchse = echtes CAN, linke = RS485) — nicht eine einzelne
+  Buchse mit gemeinsamen Pins für beides. Nur die RS485-Seite liefert Modbus;
+  am (davon unabhängigen) separaten reinen "RS485"-Anschluss (falls das BMS
+  einen hat) läuft stattdessen ein proprietärer, ASCII-basierter interner
+  Pack-zu-Pack-Bus, kein Modbus.
+- **Mehrpack-Verkabelung**: die Ketten-Durchschleifung zwischen den Packs
+  (z.B. über die zweite RS485-Buchse jedes Packs) reicht nicht aus, um andere
+  Packs per Modbus zu erreichen — beim Testen antwortete über diese Kette
+  zuverlässig nur das Pack, an dem das USB/RS485-Interface direkt hing, andere
+  Adressen liefen in den Timeout, unabhängig vom Timing (auch mit
+  großzügigem Throttle). Andere Nutzer mit demselben Problem bei identischem
+  Setup bestätigen das
+  ([DIY Solar Forum-Thread](https://diysolarforum.com/threads/pace-bms-rs-485-which-can-be-used-to-poll-daisy-chained-batteries.113619/)).
+  Erst als alle Packs mit ihrer RS485-Seite **parallel an denselben Bus**
+  verdrahtet wurden (am saubersten über ein Patchpanel, A an A, B an B, GND an
+  GND, statt einzeln durchzuschleifen), antworteten alle Adressen zuverlässig.
 
 ## Pack-Erkennung & Verhalten bei Trennung
 

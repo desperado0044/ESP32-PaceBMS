@@ -8,6 +8,7 @@
 #include "CredentialsStorage.h"
 #include "SnapshotStore.h"
 #include "RuntimeSettings.h"
+#include "ModbusSniff.h"
 
 namespace WebUiServer {
 
@@ -417,6 +418,7 @@ String buildSystemJson() {
     doc["mac"] = WiFi.macAddress();
     doc["simulateBmsData"] = RuntimeSettings::simulateBmsData();
     doc["useModbus"] = RuntimeSettings::useModbus();
+    doc["lastPollError"] = SnapshotStore::get().lastPollError;
 
     String out;
     serializeJson(doc, out);
@@ -481,6 +483,28 @@ void handleSavePollInterval(AsyncWebServerRequest* request) {
     request->redirect("/konfiguration");
 }
 
+// One-off diagnostic: passively listens on the Modbus/RS485 UART (no transmit at all) and returns
+// whatever raw bytes show up as hex - answers "is there any traffic on this bus at all, from
+// anything" independent of our own protocol code, useful when our own reads time out and it's
+// unclear whether that's a wiring/hardware issue or something in our request/response handling.
+// The actual byte collection happens in NetworkTask's own loop (ModbusSniff::collectIfActive) -
+// this handler only starts the capture and, separately, reads back whatever's been collected so
+// far. An earlier version collected bytes directly in this handler via a several-second blocking
+// loop, which starved the AsyncTCP task long enough to trip the watchdog and reboot the board.
+void handleModbusSniffStart(AsyncWebServerRequest* request) {
+    int durationMs = paramOr(request, "ms", "5000").toInt();
+    if (durationMs < 200) durationMs = 200;
+    if (durationMs > 20000) durationMs = 20000;
+    ModbusSniff::start((unsigned long)durationMs);
+    request->send(200, "text/plain",
+                  "Mitschnitt gestartet (" + String(durationMs) +
+                      "ms) - Ergebnis per GET auf denselben Pfad abrufen.");
+}
+
+void handleModbusSniffResult(AsyncWebServerRequest* request) {
+    request->send(200, "text/plain", ModbusSniff::resultText());
+}
+
 void handleSaveModbusPacks(AsyncWebServerRequest* request) {
     uint16_t mask = 0;
     for (uint8_t addr = 0; addr <= 15; addr++) {
@@ -540,6 +564,8 @@ void begin() {
     server.on("/api/config/mqtt", HTTP_POST, handleSaveMqtt);
     server.on("/api/config/protocol", HTTP_POST, handleSaveProtocol);
     server.on("/api/config/poll-interval", HTTP_POST, handleSavePollInterval);
+    server.on("/api/modbus-sniff", HTTP_POST, handleModbusSniffStart);
+    server.on("/api/modbus-sniff", HTTP_GET, handleModbusSniffResult);
     server.on("/api/config/modbus-packs", HTTP_POST, handleSaveModbusPacks);
 
     ElegantOTA.begin(&server);

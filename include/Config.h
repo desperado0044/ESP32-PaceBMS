@@ -16,7 +16,8 @@ constexpr unsigned long BMS_RESPONSE_TIMEOUT_MS = 500;
 // transmit, LOW to receive, since half-duplex RS485 never does both at once anyway.
 constexpr int MODBUS_UART_TX_PIN = 26;
 constexpr int MODBUS_UART_RX_PIN = 25;
-constexpr int MODBUS_DE_RE_PIN = 13;
+constexpr int MODBUS_DE_RE_PIN = 5;  // GPIO13 physically unreachable on this board (bottom module
+                                      // row not broken out on the carrier PCB) - moved to GPIO5.
 constexpr unsigned long MODBUS_UART_BAUD = 9600;
 constexpr unsigned long MODBUS_RESPONSE_TIMEOUT_MS = 500;
 

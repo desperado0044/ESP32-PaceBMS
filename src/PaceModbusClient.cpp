@@ -94,6 +94,11 @@ bool PaceModbusClient::readFrame(uint8_t* buf, size_t cap, size_t& outLen) {
 
 bool PaceModbusClient::readRegisters(uint8_t slaveAddress, uint16_t startRegister, uint16_t count,
                                       const uint8_t*& registerData, size_t& registerCount) {
+    // Matches syssi/esphome-pace-bms's working multi-pack example (send_wait_time +
+    // command_throttle, both 200ms) - our first attempt at this had no throttle at all between
+    // requests, which may have been the actual cause of its unreliability rather than addressing.
+    delay(200);
+
     uint8_t request[8];
     size_t requestLen = ModbusRtuProtocol::buildReadHoldingRegistersRequest(
         slaveAddress, startRegister, count, request, sizeof(request));
@@ -117,6 +122,15 @@ bool PaceModbusClient::readRegisters(uint8_t slaveAddress, uint16_t startRegiste
                                                               slaveAddress);
     if (!resp.ok) {
         lastError_ = resp.error ? resp.error : "Unknown Modbus error";
+        // Raw bytes appended so a mismatch (wrong address, garbled frame, ...) can be diagnosed
+        // over the network without a USB/serial connection to the board.
+        lastError_ += " (" + String(responseLen) + " Byte: ";
+        for (size_t i = 0; i < responseLen; i++) {
+            char b[4];
+            snprintf(b, sizeof(b), "%02X ", responseBuf_[i]);
+            lastError_ += b;
+        }
+        lastError_ += ")";
         return false;
     }
 
@@ -179,20 +193,33 @@ void PaceModbusClient::fillPackFromRegisters(const uint8_t* regs, PacePackAnalog
 bool PaceModbusClient::poll(PaceBmsSnapshot& snapshot) {
     uint16_t mask = RuntimeSettings::modbusPackAddressMask();
     uint8_t index = 0;
+    // Collected across every configured address this cycle - not just the last one to fail - so
+    // a multi-pack setup doesn't hide earlier failures behind whichever address happens to be
+    // tried last in the loop.
+    String cycleErrors;
 
     for (uint8_t addr = 0; addr <= 15 && index < PACE_MAX_PACKS; addr++) {
         if (!(mask & (1u << addr))) continue;
 
         const uint8_t* regs;
         size_t regCount;
-        bool ok = readRegisters(addr, 0, 37, regs, regCount) && regCount >= 37;
+        String addrError;
+        bool ok = readRegisters(addr, 0, 37, regs, regCount);
+        if (ok && regCount < 37) {
+            ok = false;
+            addrError = "Truncated Modbus register block (" + String(regCount) + "/37)";
+        } else if (!ok) {
+            addrError = lastError_;
+        }
 
         snapshot.packAddress[index] = addr;
         if (ok) {
             failCount_[index] = 0;
             fillPackFromRegisters(regs, snapshot.packs[index], snapshot.warn[index]);
         } else {
-            Serial.printf("Modbus: Pack Adresse %u antwortet nicht (%s)\n", addr, lastError_.c_str());
+            if (cycleErrors.length() > 0) cycleErrors += "; ";
+            cycleErrors += "Adresse " + String(addr) + ": " + addrError;
+            Serial.printf("Modbus: Pack Adresse %u antwortet nicht (%s)\n", addr, addrError.c_str());
             if (failCount_[index] < 255) failCount_[index]++;
             if (failCount_[index] >= BMS_ZERO_AFTER_CONSECUTIVE_FAILURES) {
                 // Debounced, like RS232's disconnect handling - zeroed rather than left showing a
@@ -204,6 +231,8 @@ bool PaceModbusClient::poll(PaceBmsSnapshot& snapshot) {
         index++;
     }
 
+    lastError_ = cycleErrors;  // cleared/replaced each cycle so a stale error from a past failure
+                               // doesn't linger once things start working again
     snapshot.packCount = index;
     if (index == 0) {
         lastError_ = "Keine Modbus-Packadressen konfiguriert";

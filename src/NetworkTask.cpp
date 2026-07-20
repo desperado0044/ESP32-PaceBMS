@@ -11,6 +11,7 @@
 #include "SimulatedBms.h"
 #include "RuntimeSettings.h"
 #include "BmsActivity.h"
+#include "ModbusSniff.h"
 
 namespace NetworkTask {
 
@@ -46,23 +47,29 @@ void taskEntry(void* /*pvParameters*/) {
             WebUiServer::loop();
         }
 
+        ModbusSniff::collectIfActive(Serial1);
+
         unsigned long now = millis();
-        if (now - lastPollMs >= RuntimeSettings::bmsPollIntervalMs()) {
+        if (!ModbusSniff::active() && now - lastPollMs >= RuntimeSettings::bmsPollIntervalMs()) {
             lastPollMs = now;
             BmsActivity::markRequestSent();
             bool useModbus = RuntimeSettings::useModbus();
             bool pollOk;
-            const char* pollErr = "";
+            String pollErr;
             if (RuntimeSettings::simulateBmsData()) {
                 SimulatedBms::fillSimulatedSnapshot(workingSnapshot);
                 pollOk = true;
             } else if (useModbus) {
                 pollOk = modbusClient.poll(workingSnapshot);
-                pollErr = modbusClient.lastError().c_str();
+                pollErr = modbusClient.lastError();
             } else {
                 pollOk = bmsClient.poll(workingSnapshot);
-                pollErr = bmsClient.lastError().c_str();
+                pollErr = bmsClient.lastError();
             }
+            // Stashed regardless of pollOk - Modbus in particular can report overall success (at
+            // least one configured address answered) while still having something to report for
+            // another one, and this is the only way to see it without a USB/serial connection.
+            workingSnapshot.lastPollError = pollErr;
 
             if (pollOk) {
                 BmsActivity::markResponseReceived();
@@ -70,7 +77,8 @@ void taskEntry(void* /*pvParameters*/) {
                 SnapshotStore::set(workingSnapshot);
                 if (servicesStarted) MqttManager::publishSnapshot(workingSnapshot);
             } else {
-                Serial.printf("BMS poll failed (%s): %s\n", useModbus ? "Modbus" : "RS232", pollErr);
+                Serial.printf("BMS poll failed (%s): %s\n", useModbus ? "Modbus" : "RS232",
+                              pollErr.c_str());
                 consecutiveFailures++;
                 if (consecutiveFailures == BMS_ZERO_AFTER_CONSECUTIVE_FAILURES) {
                     // BMS unresponsive for a while now - this counts as a definitive "disconnected"

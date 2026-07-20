@@ -61,4 +61,10 @@ struct PaceBmsSnapshot {
     PacePackAnalog packs[PACE_MAX_PACKS];
     PacePackWarn warn[PACE_MAX_PACKS];
     PaceCapacity capacity;
+
+    // Diagnostic only: the transport client's own lastError() from the most recent poll attempt,
+    // whatever it did - stashed here (not just logged to Serial) so it's visible over the network
+    // via /api/system without needing a USB/serial connection to the board. Empty string means the
+    // most recent attempt had nothing to report.
+    String lastPollError;
 };
