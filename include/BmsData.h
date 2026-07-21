@@ -67,4 +67,11 @@ struct PaceBmsSnapshot {
     // via /api/system without needing a USB/serial connection to the board. Empty string means the
     // most recent attempt had nothing to report.
     String lastPollError;
+
+    // Communication diagnostics, all surfaced via /api/system's "Kommunikation" section.
+    int consecutiveFailures = 0;
+    // Only meaningful for Modbus (indexed like packAddress[]/packs[] - position in the configured
+    // address list, not the address value itself); stays all-zero for RS232, which has no
+    // per-pack addressing to track separately from the single overall poll result.
+    uint8_t packFailCount[PACE_MAX_PACKS] = {0};
 };

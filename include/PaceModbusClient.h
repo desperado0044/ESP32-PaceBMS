@@ -17,6 +17,9 @@ public:
     bool poll(PaceBmsSnapshot& snapshot);
 
     const String& lastError() const { return lastError_; }
+    // Indexed like snapshot.packAddress[]/packs[] (position in the configured address list) -
+    // consecutive failures for whichever address currently sits at that position.
+    const uint8_t* failCounts() const { return failCount_; }
 
 private:
     HardwareSerial& serial_;

@@ -9,11 +9,19 @@
 #include "SnapshotStore.h"
 #include "RuntimeSettings.h"
 #include "ModbusSniff.h"
+#include "BmsActivity.h"
+#include "MqttManager.h"
 
 namespace WebUiServer {
 
 namespace {
 AsyncWebServer server(WEB_SERVER_PORT);
+
+// ElegantOTA::setAuth() only stores the const char* pointer it's given, not a copy - this must
+// stay alive for as long as OTA auth checks might reference it (i.e. permanently), so the
+// hostname string is kept here rather than as a temporary passed directly to setAuth(). Same
+// class of bug as MqttManager's mqttHostBuf for PubSubClient::setServer().
+String otaUsernameBuf;
 
 // Same dark theme/colors as the physical touch display (BmsDisplayUi.cpp) - background #0c0d12,
 // card #1a1c24, teal accent #00c896, warn tomato #ff6347, ok green #5ad282.
@@ -23,7 +31,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PACE BMS</title>
+<title>%HOSTNAME%</title>
 <style>
   :root {
     --bg: #0c0d12; --card: #1a1c24; --card-alt: #14151b; --accent: #00c896;
@@ -63,7 +71,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(
 </head>
 <body>
 <header>
-  <h1>PACE BMS</h1>
+  <h1>%HOSTNAME%</h1>
   <div id="meta">lade...</div>
 </header>
 <nav>
@@ -188,6 +196,27 @@ async function refreshSystem() {
         </div>
       </div>
       <div class="pack">
+        <h2>Kommunikation</h2>
+        <div class="stats">
+          <div class="stat"><div class="label">Poll-Intervall</div><div class="value">${(s.pollIntervalMs/1000).toFixed(1)} s</div></div>
+          <div class="stat"><div class="label">Letzter Zyklus (Dauer)</div><div class="value">${s.lastResponseMs >= s.lastRequestMs ? (s.lastResponseMs - s.lastRequestMs) + ' ms' : '...'}</div></div>
+          <div class="stat"><div class="label">Fehlversuche in Folge</div><div class="value">${s.consecutiveFailures}</div></div>
+          <div class="stat"><div class="label">UART</div><div class="value">${s.uartBaud} Baud, 8N1</div></div>
+          <div class="stat"><div class="label">MQTT</div><div class="value">${s.mqttConnected ? 'verbunden' : 'getrennt'}</div></div>
+        </div>
+        ${s.lastPollError ? `<p style="color:var(--warn);font-size:0.82rem;margin:0.6rem 0 0;word-break:break-all;">${s.lastPollError}</p>` : ''}
+        ${s.useModbus && s.packFailCount.length > 0 ? `
+        <table style="width:100%;margin-top:0.6rem;font-size:0.85rem;border-collapse:collapse;">
+          <thead><tr style="color:var(--dim);text-align:left;"><th>Adresse</th><th>Fehlversuche in Folge</th></tr></thead>
+          <tbody>${s.packFailCount.map(p => `<tr><td>${p.address}</td><td>${p.failCount}</td></tr>`).join('')}</tbody>
+        </table>` : ''}
+        <div style="margin-top:0.8rem;">
+          <button id="btn-sniff-start">Bus-Mitschnitt starten (5s)</button>
+          <button id="btn-sniff-result">Ergebnis abrufen</button>
+        </div>
+        <pre id="sniff-result" style="white-space:pre-wrap;word-break:break-all;font-size:0.78rem;margin-top:0.6rem;color:var(--dim);"></pre>
+      </div>
+      <div class="pack">
         <h2>Simulationsmodus</h2>
         <p style="color:var(--dim);font-size:0.85rem;margin:0 0 0.6rem;">
           Aktuell: <strong style="color:var(--text)">${s.simulateBmsData ? 'AN' : 'AUS'}</strong>
@@ -209,6 +238,14 @@ async function refreshSystem() {
       document.getElementById('btn-reboot').textContent = 'Neustart...';
       await fetch('/api/system/reboot', { method: 'POST' });
     });
+    document.getElementById('btn-sniff-start').addEventListener('click', async () => {
+      const res = await fetch('/api/modbus-sniff', { method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body: 'ms=5000' });
+      document.getElementById('sniff-result').textContent = await res.text();
+    });
+    document.getElementById('btn-sniff-result').addEventListener('click', async () => {
+      const res = await fetch('/api/modbus-sniff');
+      document.getElementById('sniff-result').textContent = await res.text();
+    });
   } catch (e) {
     document.getElementById('page-system').innerHTML = '<div class="placeholder">Fehler beim Laden: ' + e + '</div>';
   }
@@ -229,7 +266,7 @@ const char kConfigHtml[] PROGMEM = R"HTML(
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PACE BMS - Konfiguration</title>
+<title>%HOSTNAME% - Konfiguration</title>
 <style>
   :root { --bg: #0c0d12; --card: #1a1c24; --card-alt: #14151b; --accent: #00c896; --text: #f0f0f2; --dim: #8c919f; --divider: #2b2d36; }
   * { box-sizing: border-box; }
@@ -249,7 +286,7 @@ const char kConfigHtml[] PROGMEM = R"HTML(
 </style>
 </head>
 <body>
-<header><h1>PACE BMS</h1></header>
+<header><h1>%HOSTNAME%</h1></header>
 <nav>
   <a href="/#uebersicht">Uebersicht</a>
   <a href="/#zellen">Zellen</a>
@@ -258,6 +295,19 @@ const char kConfigHtml[] PROGMEM = R"HTML(
   <a href="/konfiguration" class="active">Konfiguration</a>
 </nav>
 <main>
+  <form method="POST" action="/api/config/hostname">
+    <fieldset>
+      <legend>Geraetename</legend>
+      <label>Name (mDNS "&lt;Name&gt;.local", OTA-Login, MQTT-Topic-Praefix)
+        <input type="text" name="hostname" value="%HOSTNAME%" pattern="[A-Za-z0-9_-]{1,32}"
+               title="Nur Buchstaben, Ziffern, - und _, 1-32 Zeichen, keine Leerzeichen" required></label>
+      <p style="color:var(--dim);font-size:0.82rem;margin:0.3rem 0 0.6rem;">
+        Bei mehreren Geraeten im selben Netz/Broker pro Geraet unterschiedlich setzen
+        (z.B. pacebms1, pacebms2), sonst kollidieren mDNS-Name und MQTT-Topics.
+      </p>
+      <button type="submit">Geraetename speichern &amp; neu starten</button>
+    </fieldset>
+  </form>
   <form method="POST" action="/api/config/wifi">
     <fieldset>
       <legend>WLAN</legend>
@@ -325,6 +375,21 @@ const char kConfigSavedHtml[] PROGMEM = R"HTML(
 <style>body{font-family:sans-serif;background:#0c0d12;color:#f0f0f2;text-align:center;padding-top:3rem;}</style>
 </head>
 <body><h1>Gespeichert</h1><p>Einstellungen wurden gespeichert. Das Geraet startet jetzt neu ...</p></body>
+</html>
+)HTML";
+
+const char kInvalidHostnameHtml[] PROGMEM = R"HTML(
+<!DOCTYPE html>
+<html lang="de">
+<head><meta charset="utf-8"><title>Ungueltiger Geraetename</title>
+<style>body{font-family:sans-serif;background:#0c0d12;color:#f0f0f2;text-align:center;padding-top:3rem;}
+a{color:#00c896;}</style>
+</head>
+<body><h1>Ungueltiger Geraetename</h1>
+<p>Nur Buchstaben, Ziffern, "-" und "_" erlaubt, 1-32 Zeichen - keine Leerzeichen oder
+Sonderzeichen (der Name wird auch als mDNS-Name, OTA-Login und MQTT-Topic-Praefix genutzt).</p>
+<p><a href="/konfiguration">Zurueck</a></p>
+</body>
 </html>
 )HTML";
 
@@ -418,7 +483,21 @@ String buildSystemJson() {
     doc["mac"] = WiFi.macAddress();
     doc["simulateBmsData"] = RuntimeSettings::simulateBmsData();
     doc["useModbus"] = RuntimeSettings::useModbus();
-    doc["lastPollError"] = SnapshotStore::get().lastPollError;
+    const PaceBmsSnapshot& snap = SnapshotStore::get();
+    doc["lastPollError"] = snap.lastPollError;
+    doc["lastRequestMs"] = BmsActivity::lastRequestMs();
+    doc["lastResponseMs"] = BmsActivity::lastResponseMs();
+    doc["pollIntervalMs"] = RuntimeSettings::bmsPollIntervalMs();
+    doc["consecutiveFailures"] = snap.consecutiveFailures;
+    doc["mqttConnected"] = MqttManager::isConnected();
+    doc["uartBaud"] = RuntimeSettings::useModbus() ? MODBUS_UART_BAUD : BMS_UART_BAUD;
+
+    JsonArray packFails = doc["packFailCount"].to<JsonArray>();
+    for (uint8_t i = 0; i < snap.packCount; i++) {
+        JsonObject pf = packFails.add<JsonObject>();
+        pf["address"] = snap.packAddress[i];
+        pf["failCount"] = snap.packFailCount[i];
+    }
 
     String out;
     serializeJson(doc, out);
@@ -445,6 +524,7 @@ void handleConfigPage(AsyncWebServerRequest* request) {
     html.replace("%MQTT_HOST%", CredentialsManager::instance().getMqttHost());
     html.replace("%MQTT_PORT%", String(CredentialsManager::instance().getMqttPort()));
     html.replace("%MQTT_USER%", CredentialsManager::instance().getMqttUser());
+    html.replace("%HOSTNAME%", CredentialsManager::instance().getHostname());
     bool modbus = RuntimeSettings::useModbus();
     html.replace("%PROTOCOL_RS232_CHECKED%", modbus ? "" : "checked");
     html.replace("%PROTOCOL_MODBUS_CHECKED%", modbus ? "checked" : "");
@@ -542,11 +622,25 @@ void handleSaveMqtt(AsyncWebServerRequest* request) {
     ESP.restart();
 }
 
+void handleSaveHostname(AsyncWebServerRequest* request) {
+    String hostname = paramOr(request, "hostname", CredentialsManager::instance().getHostname());
+    if (!CredentialsManager::instance().saveHostname(hostname)) {
+        request->send(400, "text/html", kInvalidHostnameHtml);
+        return;
+    }
+
+    request->send(200, "text/html", kConfigSavedHtml);
+    delay(500);
+    ESP.restart();
+}
+
 }  // namespace
 
 void begin() {
     server.on("/", HTTP_GET, [](AsyncWebServerRequest* request) {
-        request->send(200, "text/html", kIndexHtml);
+        String html = kIndexHtml;
+        html.replace("%HOSTNAME%", CredentialsManager::instance().getHostname());
+        request->send(200, "text/html", html);
     });
 
     server.on("/api/data", HTTP_GET, [](AsyncWebServerRequest* request) {
@@ -562,6 +656,7 @@ void begin() {
     server.on("/konfiguration", HTTP_GET, handleConfigPage);
     server.on("/api/config/wifi", HTTP_POST, handleSaveWifi);
     server.on("/api/config/mqtt", HTTP_POST, handleSaveMqtt);
+    server.on("/api/config/hostname", HTTP_POST, handleSaveHostname);
     server.on("/api/config/protocol", HTTP_POST, handleSaveProtocol);
     server.on("/api/config/poll-interval", HTTP_POST, handleSavePollInterval);
     server.on("/api/modbus-sniff", HTTP_POST, handleModbusSniffStart);
@@ -569,7 +664,8 @@ void begin() {
     server.on("/api/config/modbus-packs", HTTP_POST, handleSaveModbusPacks);
 
     ElegantOTA.begin(&server);
-    ElegantOTA.setAuth(OTA_HOSTNAME, OTA_PASSWORD);
+    otaUsernameBuf = CredentialsManager::instance().getHostname();
+    ElegantOTA.setAuth(otaUsernameBuf.c_str(), OTA_PASSWORD);
 
     server.begin();
 }

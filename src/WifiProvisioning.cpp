@@ -23,6 +23,7 @@ WiFiManagerParameter* mqttHostParam = nullptr;
 WiFiManagerParameter* mqttPortParam = nullptr;
 WiFiManagerParameter* mqttUserParam = nullptr;
 WiFiManagerParameter* mqttPassParam = nullptr;
+WiFiManagerParameter* hostnameParam = nullptr;
 
 void startPortal() {
     IPAddress apIp(WIFI_AP_IP_OCTETS[0], WIFI_AP_IP_OCTETS[1], WIFI_AP_IP_OCTETS[2],
@@ -44,10 +45,18 @@ void startPortal() {
                                               CredentialsManager::instance().getMqttUser().c_str(), 32);
     mqttPassParam = new WiFiManagerParameter("mqtt_pass", "MQTT Passwort",
                                               CredentialsManager::instance().getMqttPass().c_str(), 32);
+    // Device name: mDNS hostname, OTA login, and MQTT topic prefix all in one - matters most for
+    // multi-device setups (each needs a distinct value to avoid colliding on the same network/
+    // broker), so it's collected here too rather than only reachable later via the Konfiguration
+    // tab (which itself needs this same name to know which device you're even talking to).
+    hostnameParam = new WiFiManagerParameter(
+        "hostname", "Geraetename (mDNS/MQTT)", CredentialsManager::instance().getHostname().c_str(), 32,
+        " pattern=\"[A-Za-z0-9_-]{1,32}\" title=\"Nur Buchstaben, Ziffern, - und _\" required");
     wm.addParameter(mqttHostParam);
     wm.addParameter(mqttPortParam);
     wm.addParameter(mqttUserParam);
     wm.addParameter(mqttPassParam);
+    wm.addParameter(hostnameParam);
 
     // Non-blocking: returns immediately (almost certainly false, since nothing is connected yet).
     // The AP + captive portal keep running in the background, serviced by wm.process() in loop().
@@ -64,11 +73,15 @@ void onPortalConnected() {
     CredentialsManager::instance().saveMqtt(mqttHostParam->getValue(),
                                              String(mqttPortParam->getValue()).toInt(),
                                              mqttUserParam->getValue(), mqttPassParam->getValue());
+    if (!CredentialsManager::instance().saveHostname(hostnameParam->getValue())) {
+        Serial.println("WiFi: invalid device name from portal ignored, keeping previous value");
+    }
     delete mqttHostParam;
     delete mqttPortParam;
     delete mqttUserParam;
     delete mqttPassParam;
-    mqttHostParam = mqttPortParam = mqttUserParam = mqttPassParam = nullptr;
+    delete hostnameParam;
+    mqttHostParam = mqttPortParam = mqttUserParam = mqttPassParam = hostnameParam = nullptr;
     Serial.println("WiFi: portal credentials saved");
 }
 

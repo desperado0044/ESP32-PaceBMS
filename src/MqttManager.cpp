@@ -27,9 +27,13 @@ constexpr unsigned long kReconnectIntervalMs = 5000;
 uint8_t maxCellsSeen[PACE_MAX_PACKS] = {0};
 uint8_t maxTempsSeen[PACE_MAX_PACKS] = {0};
 
-String availabilityTopic() { return String(MQTT_BASE_TOPIC) + "/availability"; }
+String availabilityTopic() {
+    return CredentialsManager::instance().getHostname() + "/availability";
+}
 
-String topic(const String& suffix) { return String(MQTT_BASE_TOPIC) + "/" + suffix; }
+String topic(const String& suffix) {
+    return CredentialsManager::instance().getHostname() + "/" + suffix;
+}
 
 void publish(const String& suffix, const String& value, bool retain = false) {
     client.publish(topic(suffix).c_str(), value.c_str(), retain);
@@ -115,6 +119,8 @@ void publishDiscovery(const PaceBmsSnapshot& snapshot) {
                                 topic(packPrefix + "/i_pack"), "A");
         publishSensorDiscovery(deviceId, packPrefix + "_v_pack", "Pack " + String(p) + " Voltage",
                                 topic(packPrefix + "/v_pack"), "V");
+        publishSensorDiscovery(deviceId, packPrefix + "_p_pack", "Pack " + String(p) + " Power",
+                                topic(packPrefix + "/p_pack"), "W");
         publishSensorDiscovery(deviceId, packPrefix + "_i_remain_cap",
                                 "Pack " + String(p) + " Remaining Capacity",
                                 topic(packPrefix + "/i_remain_cap"), "mAh");
@@ -179,6 +185,8 @@ void publishDiscovery(const PaceBmsSnapshot& snapshot) {
                             topic("pack_design_cap"), "mAh");
     publishSensorDiscovery(deviceId, "pack_soc", "Pack State of Charge", topic("pack_soc"), "%");
     publishSensorDiscovery(deviceId, "pack_soh", "Pack State of Health", topic("pack_soh"), "%");
+    publishSensorDiscovery(deviceId, "stack_power", "Stack Power", topic("stack_power"), "W");
+    publishSensorDiscovery(deviceId, "stack_voltage", "Stack Voltage", topic("stack_voltage"), "V");
 }
 
 bool reconnect() {
@@ -235,11 +243,14 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
     if (snapshot.bmsSerial.length() > 0) publish("bms_sn", snapshot.bmsSerial, true);
     if (snapshot.packSerial.length() > 0) publish("pack_sn", snapshot.packSerial, true);
 
+    float stackPowerW = 0, stackVoltageSum = 0;
     for (uint8_t idx = 0; idx < snapshot.packCount; idx++) {
         uint8_t p = snapshot.packAddress[idx];
         String packPrefix = "pack_" + String(p);
         const PacePackAnalog& pack = snapshot.packs[idx];
         const PacePackWarn& warn = snapshot.warn[idx];
+        stackPowerW += pack.packCurrentA * pack.packVoltageV;
+        stackVoltageSum += pack.packVoltageV;
 
         if (pack.cellCount > maxCellsSeen[idx]) maxCellsSeen[idx] = pack.cellCount;
         for (uint8_t i = 0; i < maxCellsSeen[idx]; i++) {
@@ -254,6 +265,7 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
         publish(packPrefix + "/cells_max_diff_calc", (long)pack.cellMaxDiffMv);
         publish(packPrefix + "/i_pack", pack.packCurrentA);
         publish(packPrefix + "/v_pack", pack.packVoltageV);
+        publish(packPrefix + "/p_pack", pack.packCurrentA * pack.packVoltageV);
         publish(packPrefix + "/i_remain_cap", (long)pack.remainingCapacityMah);
         publish(packPrefix + "/i_full_cap", (long)pack.fullCapacityMah);
         publish(packPrefix + "/i_design_cap", (long)pack.designCapacityMah);
@@ -282,6 +294,10 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
     publish("pack_design_cap", (long)snapshot.capacity.designCapacityMah);
     publish("pack_soc", snapshot.capacity.socPercent);
     publish("pack_soh", snapshot.capacity.sohPercent);
+    publish("stack_power", stackPowerW);
+    // Packs are wired in parallel (same bus) - averaging rather than trusting a single pack index
+    // stays correct even if that particular pack happens to be offline/zeroed this cycle.
+    if (snapshot.packCount > 0) publish("stack_voltage", stackVoltageSum / snapshot.packCount);
 
     if (!discoveryPublished) {
         publishDiscovery(snapshot);

@@ -5,6 +5,7 @@
 #include "RuntimeSettings.h"
 #include "BmsActivity.h"
 #include "Config.h"
+#include "CredentialsStorage.h"
 #include <WiFi.h>
 #include <math.h>
 
@@ -316,7 +317,7 @@ void drawTopBar(TFT_eSPI& gfx) {
     gfx.setTextDatum(ML_DATUM);
     gfx.setTextFont(2);
     gfx.setTextColor(COLOR_TEXT, COLOR_CARD_ALT);
-    gfx.drawString("PACE BMS", 8, TOP_BAR_H / 2);
+    gfx.drawString(CredentialsManager::instance().getHostname(), 8, TOP_BAR_H / 2);
 
     gfx.setTextDatum(TC_DATUM);
     gfx.setTextFont(1);
@@ -403,6 +404,7 @@ void drawOverview(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
             remainSum += p.remainingCapacityMah;
             fullSum += p.fullCapacityMah;
             designSum += p.designCapacityMah;
+            agg.cellCount = p.cellCount;  // packs are the same model in practice; last one wins
             if (snapshot.warn[i].warnings.length() > 0) {
                 if (warnText.length() > 0) warnText += " | ";
                 warnText += "Pack " + String(snapshot.packAddress[i]) + ": " + snapshot.warn[i].warnings;
@@ -418,7 +420,16 @@ void drawOverview(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
 
     const PacePackAnalog& pack = aggregate ? agg : snapshot.packs[selectedPack];
     if (!aggregate) warnText = snapshot.warn[selectedPack].warnings;
-    energyKwh = pack.packVoltageV * (pack.remainingCapacityMah / 1000.0f) / 1000.0f;  // V * Ah / 1000
+    // LiFePO4's flat discharge curve makes the measured voltage a good stand-in for the average
+    // voltage over the remaining discharge in most of the SOC range - but right after a full
+    // charge it briefly overshoots above the nominal per-cell voltage (surface charge), which would
+    // overstate remaining energy. Capping at nominal (not replacing the measurement outright) fixes
+    // that one case while keeping the more accurate real reading everywhere else, including near
+    // empty where voltage sags below nominal.
+    constexpr float kLfpNominalCellVoltage = 3.2f;
+    float nominalPackVoltage = kLfpNominalCellVoltage * pack.cellCount;
+    float energyVoltage = pack.cellCount > 0 ? min(pack.packVoltageV, nominalPackVoltage) : pack.packVoltageV;
+    energyKwh = energyVoltage * (pack.remainingCapacityMah / 1000.0f) / 1000.0f;  // V * Ah / 1000
 
     bool hasWarning = warnText.length() > 0;
     // Always reserved, whether or not a warning is currently showing - if this shrank/grew with

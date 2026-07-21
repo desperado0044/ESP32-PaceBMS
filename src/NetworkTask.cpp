@@ -12,6 +12,7 @@
 #include "RuntimeSettings.h"
 #include "BmsActivity.h"
 #include "ModbusSniff.h"
+#include "CredentialsStorage.h"
 
 namespace NetworkTask {
 
@@ -36,9 +37,10 @@ void taskEntry(void* /*pvParameters*/) {
         if (!servicesStarted && WifiManager::isConnected()) {
             MqttManager::begin();
             WebUiServer::begin();
-            if (MDNS.begin(OTA_HOSTNAME)) {
+            String hostname = CredentialsManager::instance().getHostname();
+            if (MDNS.begin(hostname.c_str())) {
                 MDNS.addService("http", "tcp", WEB_SERVER_PORT);
-                Serial.printf("mDNS: reachable as %s.local\n", OTA_HOSTNAME);
+                Serial.printf("mDNS: reachable as %s.local\n", hostname.c_str());
             }
             servicesStarted = true;
         }
@@ -62,6 +64,8 @@ void taskEntry(void* /*pvParameters*/) {
             } else if (useModbus) {
                 pollOk = modbusClient.poll(workingSnapshot);
                 pollErr = modbusClient.lastError();
+                memcpy(workingSnapshot.packFailCount, modbusClient.failCounts(),
+                       sizeof(workingSnapshot.packFailCount));
             } else {
                 pollOk = bmsClient.poll(workingSnapshot);
                 pollErr = bmsClient.lastError();
@@ -71,11 +75,11 @@ void taskEntry(void* /*pvParameters*/) {
             // another one, and this is the only way to see it without a USB/serial connection.
             workingSnapshot.lastPollError = pollErr;
 
+            bool publishNow = false;
             if (pollOk) {
                 BmsActivity::markResponseReceived();
                 consecutiveFailures = 0;
-                SnapshotStore::set(workingSnapshot);
-                if (servicesStarted) MqttManager::publishSnapshot(workingSnapshot);
+                publishNow = true;
             } else {
                 Serial.printf("BMS poll failed (%s): %s\n", useModbus ? "Modbus" : "RS232",
                               pollErr.c_str());
@@ -91,10 +95,16 @@ void taskEntry(void* /*pvParameters*/) {
                     workingSnapshot.capacity = PaceCapacity();
                     workingSnapshot.valid = true;
                     workingSnapshot.lastUpdateMs = millis();
-                    SnapshotStore::set(workingSnapshot);
-                    if (servicesStarted) MqttManager::publishSnapshot(workingSnapshot);
+                    publishNow = true;
                 }
             }
+            // Communication diagnostics (consecutiveFailures/packFailCount/lastPollError) are kept
+            // fresh in the store every cycle, independent of the success/debounce logic above, so
+            // the web UI's Kommunikation section reflects what just happened, not last cycle's
+            // stale state, on every attempt, not just successes/complete-disconnect debounces.
+            workingSnapshot.consecutiveFailures = consecutiveFailures;
+            SnapshotStore::set(workingSnapshot);
+            if (publishNow && servicesStarted) MqttManager::publishSnapshot(workingSnapshot);
         }
 
         vTaskDelay(pdMS_TO_TICKS(10));

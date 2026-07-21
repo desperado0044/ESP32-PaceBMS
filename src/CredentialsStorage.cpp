@@ -20,6 +20,8 @@ String CredentialsManager::getMqttUser() { return prefs.getString("mqtt_user", M
 
 String CredentialsManager::getMqttPass() { return prefs.getString("mqtt_pass", MQTT_DEFAULT_PASS); }
 
+String CredentialsManager::getHostname() { return prefs.getString("hostname", OTA_HOSTNAME); }
+
 void CredentialsManager::saveWifi(const String& ssid, const String& pass) {
     prefs.putString("wifi_ssid", ssid);
     prefs.putString("wifi_pass", pass);
@@ -31,4 +33,14 @@ void CredentialsManager::saveMqtt(const String& host, int port, const String& us
     prefs.putInt("mqtt_port", port);
     prefs.putString("mqtt_user", user);
     prefs.putString("mqtt_pass", pass);
+}
+
+bool CredentialsManager::saveHostname(const String& hostname) {
+    if (hostname.length() == 0 || hostname.length() > 32) return false;
+    for (size_t i = 0; i < hostname.length(); i++) {
+        char c = hostname[i];
+        if (!isalnum((unsigned char)c) && c != '-' && c != '_') return false;
+    }
+    prefs.putString("hostname", hostname);
+    return true;
 }

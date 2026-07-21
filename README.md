@@ -1,10 +1,9 @@
 # ESP32 PaceBMS
 
 > Nachbau, Verdrahtung und Nutzung auf eigene Gefahr - keine Garantie für
-> Vollständigkeit, Richtigkeit oder Eignung für einen bestimmten Zweck. Der
-> Modbus/RS485-Pfad wurde ausführlich gegen ein echtes PACE-BMS (Mehrpack-
-> Stack) verifiziert (siehe „Stand / Umfang" unten); der RS232-Pfad wurde in
-> diesem Release-Stand nicht erneut an echter Hardware getestet.
+> Vollständigkeit, Richtigkeit oder Eignung für einen bestimmten Zweck. Beide
+> Anschlussarten (RS232 und Modbus RTU/RS485) wurden ausführlich gegen ein
+> echtes PACE-BMS (Mehrpack-Stack) verifiziert (siehe „Stand / Umfang" unten).
 
 ESP32-Firmware zum Auslesen eines PACE-basierten BMS mit Web-Oberfläche und
 MQTT/Home-Assistant-Anbindung. Zwei wählbare Anschlussarten (Umschalter im
@@ -35,17 +34,15 @@ Konfiguration-Tab):
   „MQTT / Home Assistant" unten).
 - **Zwei BMS-Anschlussarten** (RS232 oder Modbus RTU/RS485), umschaltbar über den
   Konfiguration-Tab, ohne Neu-Flashen — siehe „Modbus RTU / RS485" unten.
-  Dieser Release-Stand wurde ausführlich gegen echte Modbus/RS485-Hardware
-  getestet; der RS232-Pfad selbst wurde dabei **nicht erneut** an echter
-  Hardware verifiziert (Code unverändert gegenüber dem letzten getesteten
-  Stand).
+  Beide Pfade wurden in diesem Release-Stand gegen echte Hardware verifiziert
+  (Mehrpack-Stack, PACE P16S100A).
 
 ## Kompatible Geräte (ungetestet)
 
 Folgende Geräte laufen laut [syssi/esphome-pace-bms](https://github.com/syssi/esphome-pace-bms)
 mit einem PACE-BMS-Innenleben über dessen RS485/Modbus-Protokoll — mit dem hier
 neu eingebauten Modbus-Modus (siehe unten) also potenziell direkt nutzbar, auch
-wenn wir das an keinem dieser Geräte selbst getestet haben:
+wenn das an keinem dieser Geräte selbst getestet wurde:
 
 - Katbatt 6.4kWh LiFePO4 (PACE BMS P16S200A)
 - Gobel Power GP-SR1-LF280-RN150 51.2V 280Ah (PACE BMS S16A150)
@@ -87,11 +84,12 @@ belegt (siehe unten). GPIO34 ist input-only, für reinen RX-Betrieb unproblemati
 |------------------------|----------------------------------------------|
 | T1OUT                  | Pin 4 (BMS_Rx)                               |
 | R1IN                   | Pin 3 (BMS_Tx)                               |
-| GND                    | Pin 2 / Pin 5 (GND)                          |
+| GND                    | Pin 5 (GND)                                  |
 
 UART-Parameter: **9600 Baud, 8N1** (siehe `include/Config.h`).
 
-Die genaue RJ11-Belegung kann je nach Marke/Modell abweichen — vor dem
+Pin 5 als GND an echter Hardware bestätigt (PACE P16S100A). Die genaue
+RJ11-Belegung kann je nach Marke/Modell trotzdem abweichen — vor dem
 Anschließen mit einem Multimeter/Oszilloskop verifizieren.
 
 **Das Pack am RS232-Port muss per Dip-Schalter auf Adresse 1 stehen.** Laut
@@ -402,15 +400,23 @@ Einrichtungsportal:
 1. Mit dem Hotspot **`PaceBMS-Setup`** verbinden (offen, kein Passwort). Die
    meisten Geräte öffnen die Portal-Seite automatisch (Captive-Portal-Erkennung);
    sonst manuell `http://10.0.0.1` aufrufen.
-2. WLAN-SSID/Passwort **und** MQTT-Broker/Port/User/Passwort eintragen (beides auf
-   derselben Seite, da keins davon im Voraus bekannt ist).
+2. WLAN-SSID/Passwort, MQTT-Broker/Port/User/Passwort **und den Gerätenamen**
+   eintragen (alles auf derselben Seite, da nichts davon im Voraus bekannt ist).
 3. Nach dem Speichern verbindet sich das Gerät und startet MQTT/Webserver.
 
-Beides — WLAN und MQTT — lässt sich später **unabhängig voneinander** ändern, ohne
-das Portal erneut zu öffnen: über den **Konfiguration**-Tab der Weboberfläche
-(`http://<ip>/konfiguration`), zwei getrennte Formulare mit eigenem
-Speichern-Button. Passwortfelder leer lassen = unverändert übernehmen. Jedes
-Speichern startet das Gerät neu, um die neuen Werte zu übernehmen.
+**Gerätename** ist eine einzelne Einstellung mit drei Auswirkungen zugleich:
+mDNS-Name (`<Name>.local`), OTA-Update-Login und MQTT-Topic-Präfix. Bei
+**mehreren Geräten** im selben Netz/Broker (z.B. mehrere Akku-Bänke) muss
+jedes Gerät hier einen eigenen Namen bekommen (z.B. `pacebms1`/`pacebms2`),
+sonst kollidieren mDNS-Name und MQTT-Topics. Der Name erscheint zusätzlich in
+der Kopfzeile von Display und Weboberfläche zur einfachen Zuordnung.
+
+Alle drei — WLAN, MQTT und Gerätename — lassen sich später **unabhängig
+voneinander** ändern, ohne das Portal erneut zu öffnen: über den
+**Konfiguration**-Tab der Weboberfläche (`http://<ip>/konfiguration`), jeweils
+eigene Formulare mit eigenem Speichern-Button. Passwortfelder leer lassen =
+unverändert übernehmen. Jedes Speichern startet das Gerät neu, um die neuen
+Werte zu übernehmen.
 
 Das Portal bricht nie mehr in den Bedienfluss ein: Verbindungsaufbau und Portal
 laufen nicht-blockierend auf dem Netzwerk-Task (siehe Architektur oben), das
@@ -443,15 +449,27 @@ rechts; Web-UI: System-Tab) startet das Gerät auch ohne Update jederzeit neu.
 Nach dem Verbinden läuft ein Webserver auf Port 80 mit Tabs analog zum Display
 (Übersicht/Zellen/Status, aktualisiert alle 5 Sekunden per `GET /api/data`,
 JSON; System per `GET /api/system`) plus dem oben beschriebenen
-**Konfiguration**-Tab.
+**Konfiguration**-Tab. Der **System**-Tab hat zusätzlich einen
+**Kommunikation**-Block: Poll-Intervall, Dauer des letzten Auslesezyklus,
+Fehlversuche in Folge, UART-Parameter, MQTT-Verbindungsstatus, bei Modbus
+zusätzlich Fehlversuche pro Pack-Adresse, sowie Start/Ergebnis-Buttons für
+einen passiven Bus-Mitschnitt (`/api/modbus-sniff`) — nützlich zum Debuggen
+der RS485-Verkabelung ohne USB/Serial-Zugriff.
 
 ## MQTT / Home Assistant
 
-Alle Werte werden unter dem Topic-Präfix `pacebms/...` veröffentlicht (siehe
-`Config.h` → `MQTT_BASE_TOPIC`), inklusive Home-Assistant-MQTT-Discovery
-(`homeassistant/...`) für Zellspannungen, Temperaturen, SOC/SOH, Zyklen,
-Warnungen sowie Schutz-/FET-/Balancing-Status als Binary Sensors. Broker/Port/
-User/Passwort werden wie oben beschrieben eingerichtet, nicht im Code.
+Alle Werte werden unter dem Topic-Präfix `<Gerätename>/...` veröffentlicht
+(siehe „Geräte­name" oben — ein Wert, konfigurierbar über den
+Konfiguration-Tab oder das Ersteinrichtungsportal, dient gleichzeitig als
+mDNS-Name, OTA-Login und MQTT-Präfix), inklusive Home-Assistant-MQTT-Discovery
+(`homeassistant/...`, ein retained Topic pro Sensor/Binary-Sensor — Home
+Assistant legt alle Entitäten automatisch an, keine manuelle YAML-Konfiguration
+nötig) für Zellspannungen, Temperaturen, SOC/SOH, Zyklen, Warnungen sowie
+Schutz-/FET-/Balancing-Status als Binary Sensors. Zusätzlich pro Pack
+`p_pack` (W, berechnet aus Strom × Spannung) sowie stack-weit `stack_power`
+(W, Summe aller Packs) und `stack_voltage` (V, gemittelt über alle Packs —
+bleibt korrekt, auch wenn einzelne Packs gerade offline/genullt sind). Broker/
+Port/User/Passwort werden wie oben beschrieben eingerichtet, nicht im Code.
 
 ## Projektstruktur
 

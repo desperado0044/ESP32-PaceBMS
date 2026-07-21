@@ -42,9 +42,17 @@ bool PaceBmsClient::readFrame(uint8_t* buf, size_t cap, size_t& outLen) {
     size_t len = 0;
     bool started = false;
 
+    // Diagnostic only: every byte actually seen on the wire, including anything before SOI is
+    // found (which the real parse below discards without ever recording) - so a timeout can report
+    // exactly what (if anything) arrived, over the network, without a USB/serial connection.
+    constexpr size_t kRawCap = 64;
+    uint8_t raw[kRawCap];
+    size_t rawLen = 0;
+
     while (millis() - start < responseTimeoutMs_) {
         while (serial_.available()) {
             int c = serial_.read();
+            if (rawLen < kRawCap) raw[rawLen++] = (uint8_t)c;
             if (!started) {
                 if (c != (int)PaceBmsProtocol::SOI) continue;
                 started = true;
@@ -60,7 +68,13 @@ bool PaceBmsClient::readFrame(uint8_t* buf, size_t cap, size_t& outLen) {
             }
         }
     }
-    lastError_ = "Timeout waiting for BMS response";
+    lastError_ = "Timeout waiting for BMS response (" + String(rawLen) + " Byte gesehen: ";
+    for (size_t i = 0; i < rawLen; i++) {
+        char b[4];
+        snprintf(b, sizeof(b), "%02X ", raw[i]);
+        lastError_ += b;
+    }
+    lastError_ += ")";
     return false;
 }
 
