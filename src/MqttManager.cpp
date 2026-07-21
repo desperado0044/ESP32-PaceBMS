@@ -49,13 +49,16 @@ void publish(const String& suffix, long value, bool retain = false) {
 
 void publishSensorDiscovery(const String& deviceId, const String& uniqueSuffix,
                              const String& name, const String& stateTopic,
-                             const char* unit) {
+                             const char* unit, const char* stateClass = nullptr,
+                             const char* icon = nullptr) {
     JsonDocument doc;
     doc["name"] = name;
     doc["unique_id"] = "pacebms_" + deviceId + "_" + uniqueSuffix;
     doc["state_topic"] = stateTopic;
     doc["availability_topic"] = availabilityTopic();
     if (unit) doc["unit_of_measurement"] = unit;
+    if (stateClass) doc["state_class"] = stateClass;
+    if (icon) doc["icon"] = icon;
     JsonObject device = doc["device"].to<JsonObject>();
     device["manufacturer"] = "PACE";
     device["model"] = "PACE BMS";
@@ -123,10 +126,12 @@ void publishDiscovery(const PaceBmsSnapshot& snapshot) {
                                 topic(packPrefix + "/p_pack"), "W");
         publishSensorDiscovery(deviceId, packPrefix + "_i_remain_cap",
                                 "Pack " + String(p) + " Remaining Capacity",
-                                topic(packPrefix + "/i_remain_cap"), "mAh");
+                                topic(packPrefix + "/i_remain_cap"), "mAh", "measurement",
+                                "mdi:battery-check");
         publishSensorDiscovery(deviceId, packPrefix + "_i_full_cap",
                                 "Pack " + String(p) + " Full Capacity",
-                                topic(packPrefix + "/i_full_cap"), "mAh");
+                                topic(packPrefix + "/i_full_cap"), "mAh", "measurement",
+                                "mdi:battery-check");
         publishSensorDiscovery(deviceId, packPrefix + "_i_design_cap",
                                 "Pack " + String(p) + " Design Capacity",
                                 topic(packPrefix + "/i_design_cap"), "mAh");
@@ -187,6 +192,12 @@ void publishDiscovery(const PaceBmsSnapshot& snapshot) {
     publishSensorDiscovery(deviceId, "pack_soh", "Pack State of Health", topic("pack_soh"), "%");
     publishSensorDiscovery(deviceId, "stack_power", "Stack Power", topic("stack_power"), "W");
     publishSensorDiscovery(deviceId, "stack_voltage", "Stack Voltage", topic("stack_voltage"), "V");
+    publishSensorDiscovery(deviceId, "stack_remaining_capacity", "Stack Remaining Capacity",
+                            topic("stack_remaining_capacity"), "mAh", "measurement",
+                            "mdi:battery-check");
+    publishSensorDiscovery(deviceId, "stack_full_capacity", "Stack Full Capacity",
+                            topic("stack_full_capacity"), "mAh", "measurement",
+                            "mdi:battery-check");
 }
 
 bool reconnect() {
@@ -244,6 +255,7 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
     if (snapshot.packSerial.length() > 0) publish("pack_sn", snapshot.packSerial, true);
 
     float stackPowerW = 0, stackVoltageSum = 0;
+    uint32_t stackRemainCapMah = 0, stackFullCapMah = 0;
     for (uint8_t idx = 0; idx < snapshot.packCount; idx++) {
         uint8_t p = snapshot.packAddress[idx];
         String packPrefix = "pack_" + String(p);
@@ -251,6 +263,13 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
         const PacePackWarn& warn = snapshot.warn[idx];
         stackPowerW += pack.packCurrentA * pack.packVoltageV;
         stackVoltageSum += pack.packVoltageV;
+        // Only sum packs currently reporting a real voltage - a failed/zeroed pack (see
+        // packFailCount handling in NetworkTask) must not drag the stack total down to a
+        // misleadingly low value.
+        if (pack.packVoltageV > 0) {
+            stackRemainCapMah += pack.remainingCapacityMah;
+            stackFullCapMah += pack.fullCapacityMah;
+        }
 
         if (pack.cellCount > maxCellsSeen[idx]) maxCellsSeen[idx] = pack.cellCount;
         for (uint8_t i = 0; i < maxCellsSeen[idx]; i++) {
@@ -298,6 +317,8 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
     // Packs are wired in parallel (same bus) - averaging rather than trusting a single pack index
     // stays correct even if that particular pack happens to be offline/zeroed this cycle.
     if (snapshot.packCount > 0) publish("stack_voltage", stackVoltageSum / snapshot.packCount);
+    publish("stack_remaining_capacity", (long)stackRemainCapMah);
+    publish("stack_full_capacity", (long)stackFullCapMah);
 
     if (!discoveryPublished) {
         publishDiscovery(snapshot);

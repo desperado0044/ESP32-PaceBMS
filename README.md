@@ -66,7 +66,8 @@ bestätigt: Greenrich U-P5000, Hubble Lithium (AM2, AM4, X-101), Revov R9, SOK 4
 - MAX3232-Modul (oder ähnlicher RS232-Transceiver) zwischen ESP32-UART2 und dem
   RS232-Port des BMS. Die PACE-BMS-Ports sind **echtes RS232**, nicht TTL — ohne
   Pegelwandler wird nichts empfangen und im schlimmsten Fall Hardware beschädigt.
-- 2.8" TFT SPI, 320×240, ILI9341-Treiber + resistiver Touch (XPT2046).
+- 2.4" TFT SPI, 320×240, ILI9341-Treiber + resistiver Touch (XPT2046). Andere Displaygrößen mit demselben
+  Treiber sollten auch funktionieren.
 
 ### BMS-UART (UART2)
 
@@ -84,13 +85,15 @@ belegt (siehe unten). GPIO34 ist input-only, für reinen RX-Betrieb unproblemati
 |------------------------|----------------------------------------------|
 | T1OUT                  | Pin 4 (BMS_Rx)                               |
 | R1IN                   | Pin 3 (BMS_Tx)                               |
-| GND                    | Pin 5 (GND)                                  |
+| GND                    | Pin 2 / Pin 5 (GND)                          |
 
 UART-Parameter: **9600 Baud, 8N1** (siehe `include/Config.h`).
 
-Pin 5 als GND an echter Hardware bestätigt (PACE P16S100A). Die genaue
-RJ11-Belegung kann je nach Marke/Modell trotzdem abweichen — vor dem
-Anschließen mit einem Multimeter/Oszilloskop verifizieren.
+Pin 2 und Pin 5 sind laut [syssi/esphome-pace-bms](https://github.com/syssi/esphome-pace-bms)
+beide GND (symmetrische Belegung der 6P6C-Buchse) — Pin 5 wurde zusätzlich an
+echter Hardware bestätigt (PACE P16S100A). Die genaue RJ11-Belegung kann je
+nach Marke/Modell trotzdem abweichen — vor dem Anschließen mit einem
+Multimeter/Oszilloskop verifizieren.
 
 **Das Pack am RS232-Port muss per Dip-Schalter auf Adresse 1 stehen.** Laut
 offiziellem PACE-RS232-Protokolldokument gilt Adresse 1 als Master-Rolle im
@@ -467,9 +470,11 @@ Assistant legt alle Entitäten automatisch an, keine manuelle YAML-Konfiguration
 nötig) für Zellspannungen, Temperaturen, SOC/SOH, Zyklen, Warnungen sowie
 Schutz-/FET-/Balancing-Status als Binary Sensors. Zusätzlich pro Pack
 `p_pack` (W, berechnet aus Strom × Spannung) sowie stack-weit `stack_power`
-(W, Summe aller Packs) und `stack_voltage` (V, gemittelt über alle Packs —
-bleibt korrekt, auch wenn einzelne Packs gerade offline/genullt sind). Broker/
-Port/User/Passwort werden wie oben beschrieben eingerichtet, nicht im Code.
+(W, Summe aller Packs), `stack_voltage` (V, gemittelt über alle Packs —
+bleibt korrekt, auch wenn einzelne Packs gerade offline/genullt sind),
+`stack_remaining_capacity` und `stack_full_capacity` (jeweils mAh, Summe aller
+Packs mit aktuell gemeldeter Spannung > 0). Broker/Port/User/Passwort werden
+wie oben beschrieben eingerichtet, nicht im Code.
 
 ## Projektstruktur
 
