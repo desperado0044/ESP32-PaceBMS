@@ -60,7 +60,7 @@ void publishSensorDiscovery(const String& deviceId, const String& uniqueSuffix,
     device["manufacturer"] = "PACE";
     device["model"] = "PACE BMS";
     device["identifiers"] = "pacebms_" + deviceId;
-    device["name"] = "PACE BMS";
+    device["name"] = CredentialsManager::instance().getHostname();
 
     String payload;
     serializeJson(doc, payload);
@@ -82,7 +82,7 @@ void publishBinarySensorDiscovery(const String& deviceId, const String& uniqueSu
     device["manufacturer"] = "PACE";
     device["model"] = "PACE BMS";
     device["identifiers"] = "pacebms_" + deviceId;
-    device["name"] = "PACE BMS";
+    device["name"] = CredentialsManager::instance().getHostname();
 
     String payload;
     serializeJson(doc, payload);
