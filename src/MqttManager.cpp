@@ -256,17 +256,19 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
 
     float stackPowerW = 0, stackVoltageSum = 0;
     uint32_t stackRemainCapMah = 0, stackFullCapMah = 0;
+    uint8_t onlinePackCount = 0;
     for (uint8_t idx = 0; idx < snapshot.packCount; idx++) {
         uint8_t p = snapshot.packAddress[idx];
         String packPrefix = "pack_" + String(p);
         const PacePackAnalog& pack = snapshot.packs[idx];
         const PacePackWarn& warn = snapshot.warn[idx];
         stackPowerW += pack.packCurrentA * pack.packVoltageV;
-        stackVoltageSum += pack.packVoltageV;
-        // Only sum packs currently reporting a real voltage - a failed/zeroed pack (see
-        // packFailCount handling in NetworkTask) must not drag the stack total down to a
-        // misleadingly low value.
+        // Only count packs currently reporting a real voltage - a failed/zeroed pack (see
+        // packFailCount handling in NetworkTask) must not drag the stack voltage average or
+        // capacity totals down to a misleadingly low value.
         if (pack.packVoltageV > 0) {
+            stackVoltageSum += pack.packVoltageV;
+            onlinePackCount++;
             stackRemainCapMah += pack.remainingCapacityMah;
             stackFullCapMah += pack.fullCapacityMah;
         }
@@ -314,9 +316,10 @@ void publishSnapshot(const PaceBmsSnapshot& snapshot) {
     publish("pack_soc", snapshot.capacity.socPercent);
     publish("pack_soh", snapshot.capacity.sohPercent);
     publish("stack_power", stackPowerW);
-    // Packs are wired in parallel (same bus) - averaging rather than trusting a single pack index
-    // stays correct even if that particular pack happens to be offline/zeroed this cycle.
-    if (snapshot.packCount > 0) publish("stack_voltage", stackVoltageSum / snapshot.packCount);
+    // Packs are wired in parallel (same bus) - averaged over only the packs currently online, so a
+    // failed/zeroed pack doesn't drag the average down (dividing by the full packCount would count
+    // its 0V reading as a real data point instead of excluding it).
+    if (onlinePackCount > 0) publish("stack_voltage", stackVoltageSum / onlinePackCount);
     publish("stack_remaining_capacity", (long)stackRemainCapMah);
     publish("stack_full_capacity", (long)stackFullCapMah);
 

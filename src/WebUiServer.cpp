@@ -113,17 +113,23 @@ function fmt(n, d) { return (typeof n === 'number') ? n.toFixed(d) : '-'; }
 // same nominal-voltage cap on the energy figure (LiFePO4 post-charge surface-voltage overshoot).
 function computeAggregate(packs) {
   let voltageSum = 0, currentSum = 0, remainSum = 0, fullSum = 0, designSum = 0, cellCount = 0;
+  let onlinePackCount = 0;
   const warnParts = [];
   packs.forEach(p => {
-    voltageSum += p.voltageV;
     currentSum += p.currentA;
     remainSum += p.remainingCapacityMah;
     fullSum += p.fullCapacityMah;
     designSum += p.designCapacityMah;
-    cellCount = (p.cellsMv || []).length;
+    // Only average voltage (and pick cellCount) from packs currently reporting a real voltage -
+    // a failed/zeroed pack's 0V would otherwise drag the average down misleadingly.
+    if (p.voltageV > 0) {
+      voltageSum += p.voltageV;
+      onlinePackCount++;
+      cellCount = (p.cellsMv || []).length;
+    }
     if (p.warnings) warnParts.push('Pack ' + p.index + ': ' + p.warnings);
   });
-  const voltageV = packs.length > 0 ? voltageSum / packs.length : 0;
+  const voltageV = onlinePackCount > 0 ? voltageSum / onlinePackCount : 0;
   const socPercent = fullSum > 0 ? (remainSum * 100 / fullSum) : 0;
   const sohPercent = designSum > 0 ? (fullSum * 100 / designSum) : 0;
   const nominalVoltage = cellCount > 0 ? 3.2 * cellCount : voltageV;

@@ -397,20 +397,27 @@ void drawOverview(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
     if (aggregate) {
         float voltageSum = 0, currentSum = 0;
         uint32_t remainSum = 0, fullSum = 0, designSum = 0;
+        uint8_t onlinePackCount = 0;
         for (uint8_t i = 0; i < snapshot.packCount; i++) {
             const PacePackAnalog& p = snapshot.packs[i];
-            voltageSum += p.packVoltageV;
             currentSum += p.packCurrentA;
             remainSum += p.remainingCapacityMah;
             fullSum += p.fullCapacityMah;
             designSum += p.designCapacityMah;
-            agg.cellCount = p.cellCount;  // packs are the same model in practice; last one wins
+            // Only average voltage (and pick cellCount) from packs currently reporting a real
+            // voltage - a failed/zeroed pack's 0V would otherwise drag the average down to a
+            // misleadingly low value instead of being excluded.
+            if (p.packVoltageV > 0) {
+                voltageSum += p.packVoltageV;
+                onlinePackCount++;
+                agg.cellCount = p.cellCount;  // packs are the same model in practice; last one wins
+            }
             if (snapshot.warn[i].warnings.length() > 0) {
                 if (warnText.length() > 0) warnText += " | ";
                 warnText += "Pack " + String(snapshot.packAddress[i]) + ": " + snapshot.warn[i].warnings;
             }
         }
-        agg.packVoltageV = snapshot.packCount > 0 ? voltageSum / snapshot.packCount : 0;
+        agg.packVoltageV = onlinePackCount > 0 ? voltageSum / onlinePackCount : 0;
         agg.packCurrentA = currentSum;
         agg.remainingCapacityMah = remainSum;
         agg.fullCapacityMah = fullSum;
