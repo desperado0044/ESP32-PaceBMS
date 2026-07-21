@@ -102,17 +102,8 @@ void fillSimulatedSnapshot(PaceBmsSnapshot& snapshot) {
     fillPack(snapshot.packs[1], snapshot.warn[1], t, -8.0f, 35.0f);
     fillPack(snapshot.packs[2], snapshot.warn[2], t, 5.0f, 70.0f);
 
-    uint32_t remainSum = 0, fullSum = 0, designSum = 0;
-    for (uint8_t i = 0; i < kPackCount; i++) {
-        remainSum += snapshot.packs[i].remainingCapacityMah;
-        fullSum += snapshot.packs[i].fullCapacityMah;
-        designSum += snapshot.packs[i].designCapacityMah;
-    }
-    snapshot.capacity.remainCapacityMah = remainSum;
-    snapshot.capacity.fullCapacityMah = fullSum;
-    snapshot.capacity.designCapacityMah = designSum;
-    snapshot.capacity.socPercent = fullSum > 0 ? (remainSum * 100.0f) / fullSum : 0;
-    snapshot.capacity.sohPercent = designSum > 0 ? (fullSum * 100.0f) / designSum : 0;
+    // snapshot.capacity (stack-wide) is computed centrally by NetworkTask from the per-pack data,
+    // not here - same computation for real BMS data and simulation.
 }
 
 }  // namespace SimulatedBms

@@ -10,7 +10,6 @@ constexpr const char* kCid2PackNumber = "90";
 constexpr const char* kCid2PackAnalogData = "42";
 constexpr const char* kCid2SoftwareVersion = "C1";
 constexpr const char* kCid2SerialNumber = "C2";
-constexpr const char* kCid2PackCapacity = "A6";
 constexpr const char* kCid2WarnInfo = "44";
 
 // warningStates from constants.py: keys are literal 2-char ASCII codes.
@@ -237,32 +236,6 @@ bool PaceBmsClient::readAnalogData(PaceBmsSnapshot& snapshot) {
     return true;
 }
 
-bool PaceBmsClient::readPackCapacity(PaceCapacity& outCapacity) {
-    const uint8_t* info;
-    size_t infoLen;
-    if (!sendAndReceive(kCid2PackCapacity, nullptr, info, infoLen)) return false;
-
-    size_t pos = 0;
-    long remainCap = PaceBmsProtocol::readHexField(info, infoLen, pos, 4);
-    long fullCap = PaceBmsProtocol::readHexField(info, infoLen, pos, 4);
-    long designCap = PaceBmsProtocol::readHexField(info, infoLen, pos, 4);
-    if (remainCap < 0 || fullCap < 0 || designCap < 0) {
-        lastError_ = "Truncated pack capacity response";
-        return false;
-    }
-
-    outCapacity.remainCapacityMah = (uint32_t)remainCap * 10;
-    outCapacity.fullCapacityMah = (uint32_t)fullCap * 10;
-    outCapacity.designCapacityMah = (uint32_t)designCap * 10;
-    outCapacity.socPercent = outCapacity.fullCapacityMah > 0
-                                  ? (outCapacity.remainCapacityMah * 100.0f) / outCapacity.fullCapacityMah
-                                  : 0;
-    outCapacity.sohPercent = outCapacity.designCapacityMah > 0
-                                  ? (outCapacity.fullCapacityMah * 100.0f) / outCapacity.designCapacityMah
-                                  : 0;
-    return true;
-}
-
 bool PaceBmsClient::readWarnInfo(PaceBmsSnapshot& snapshot) {
     const uint8_t* info;
     size_t infoLen;
@@ -365,7 +338,6 @@ bool PaceBmsClient::poll(PaceBmsSnapshot& snapshot) {
 
     bool ok = true;
     if (!readAnalogData(snapshot)) ok = false;
-    if (!readPackCapacity(snapshot.capacity)) ok = false;
     if (!readWarnInfo(snapshot)) ok = false;
 
     if (ok) {

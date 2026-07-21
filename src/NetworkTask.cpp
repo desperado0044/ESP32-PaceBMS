@@ -92,12 +92,32 @@ void taskEntry(void* /*pvParameters*/) {
                         workingSnapshot.packs[i] = PacePackAnalog();
                         workingSnapshot.warn[i] = PacePackWarn();
                     }
-                    workingSnapshot.capacity = PaceCapacity();
                     workingSnapshot.valid = true;
                     workingSnapshot.lastUpdateMs = millis();
                     publishNow = true;
                 }
             }
+            // Stack-wide capacity/SOC/SOH: computed once, here, uniformly for both protocols and
+            // simulation mode - same weighted logic as the display's/web UI's "Gesamt" aggregate and
+            // the MQTT stack_remaining_capacity/stack_full_capacity topics (sum only packs currently
+            // reporting a real voltage, SOC/SOH weighted by capacity, not a plain average). Replaces
+            // RS232's old dedicated "pack capacity" command, which per Tertiush/bmspace's own notes
+            // unreliably always answered with pack 1's data regardless of the real pack count.
+            uint32_t remainSum = 0, fullSum = 0, designSum = 0;
+            for (uint8_t i = 0; i < workingSnapshot.packCount; i++) {
+                const PacePackAnalog& p = workingSnapshot.packs[i];
+                if (p.packVoltageV > 0) {
+                    remainSum += p.remainingCapacityMah;
+                    fullSum += p.fullCapacityMah;
+                    designSum += p.designCapacityMah;
+                }
+            }
+            workingSnapshot.capacity.remainCapacityMah = remainSum;
+            workingSnapshot.capacity.fullCapacityMah = fullSum;
+            workingSnapshot.capacity.designCapacityMah = designSum;
+            workingSnapshot.capacity.socPercent = fullSum > 0 ? (remainSum * 100.0f) / fullSum : 0;
+            workingSnapshot.capacity.sohPercent = designSum > 0 ? (fullSum * 100.0f) / designSum : 0;
+
             // Communication diagnostics (consecutiveFailures/packFailCount/lastPollError) are kept
             // fresh in the store every cycle, independent of the success/debounce logic above, so
             // the web UI's Kommunikation section reflects what just happened, not last cycle's

@@ -239,18 +239,9 @@ bool PaceModbusClient::poll(PaceBmsSnapshot& snapshot) {
         return false;
     }
 
-    uint32_t remain = 0, full = 0, design = 0;
-    for (uint8_t i = 0; i < index; i++) {
-        remain += snapshot.packs[i].remainingCapacityMah;
-        full += snapshot.packs[i].fullCapacityMah;
-        design += snapshot.packs[i].designCapacityMah;
-    }
-    snapshot.capacity.remainCapacityMah = remain;
-    snapshot.capacity.fullCapacityMah = full;
-    snapshot.capacity.designCapacityMah = design;
-    snapshot.capacity.socPercent = full > 0 ? (remain * 100.0f) / full : 0;
-    snapshot.capacity.sohPercent = design > 0 ? (full * 100.0f) / design : 0;
-
+    // Stack-wide snapshot.capacity is computed centrally by NetworkTask from the per-pack data
+    // (filtered to packs currently reporting a real voltage) - not here, so both protocols and
+    // simulation mode share exactly one computation.
     if (snapshot.bmsVersion.length() == 0) snapshot.bmsVersion = "Modbus";
 
     snapshot.valid = true;

@@ -481,12 +481,8 @@ Schutz-/FET-/Balancing-Status als Binary Sensors. Zusätzlich pro Pack
 (W, Summe aller Packs), `stack_voltage` (V, gemittelt über alle Packs —
 bleibt korrekt, auch wenn einzelne Packs gerade offline/genullt sind),
 `stack_remaining_capacity` und `stack_full_capacity` (jeweils mAh, Summe aller
-Packs mit aktuell gemeldeter Spannung > 0). Diese stack-weiten Topics
-summieren/mitteln automatisch über die tatsächlich konfigurierte Pack-Anzahl
-(RS232: vom Master gemeldete Anzahl; Modbus: Anzahl angehakter Adressen) —
-keine feste Pack-Zahl im Code, funktioniert unverändert bei mehr oder weniger
-Packs. Broker/Port/User/Passwort werden wie oben beschrieben eingerichtet,
-nicht im Code.
+Packs mit aktuell gemeldeter Spannung > 0). Broker/Port/User/Passwort werden
+wie oben beschrieben eingerichtet, nicht im Code.
 
 ## Projektstruktur
 

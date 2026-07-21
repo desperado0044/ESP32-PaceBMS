@@ -11,8 +11,12 @@ public:
     explicit PaceBmsClient(HardwareSerial& serial, unsigned long responseTimeoutMs = 500);
 
     // Runs the same read sequence as the upstream script (version+serial once,
-    // then analog data / pack capacity / warning info every call) and fills
-    // snapshot in place. Returns true if every step succeeded.
+    // then analog data / warning info every call) and fills snapshot in place.
+    // Returns true if every step succeeded. Stack-wide capacity/SOC/SOH
+    // (snapshot.capacity) is computed by NetworkTask from the per-pack data
+    // afterward, not read here - the dedicated RS232 "pack capacity" command
+    // was dropped because it unreliably always answered with pack 1's data
+    // regardless of the real pack count (per Tertiush/bmspace's own notes).
     bool poll(PaceBmsSnapshot& snapshot);
 
     const String& lastError() const { return lastError_; }
@@ -31,7 +35,6 @@ private:
     bool readVersion(String& outVersion);
     bool readSerials(String& outBmsSerial, String& outPackSerial);
     bool readAnalogData(PaceBmsSnapshot& snapshot);
-    bool readPackCapacity(PaceCapacity& outCapacity);
     bool readWarnInfo(PaceBmsSnapshot& snapshot);
 
     // Response buffer, reused across requests.
