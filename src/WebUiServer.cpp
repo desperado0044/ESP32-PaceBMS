@@ -107,6 +107,34 @@ activatePage((location.hash || '#uebersicht').substring(1));
 
 function fmt(n, d) { return (typeof n === 'number') ? n.toFixed(d) : '-'; }
 
+// Mirrors the display's "Gesamt" aggregate (BmsDisplayUi.cpp) so the web overview matches what
+// the touchscreen shows: bus voltage averaged (packs are wired in parallel, same bus), current/
+// capacities summed, SOC/SOH weighted by capacity (not a plain average across packs), and the
+// same nominal-voltage cap on the energy figure (LiFePO4 post-charge surface-voltage overshoot).
+function computeAggregate(packs) {
+  let voltageSum = 0, currentSum = 0, remainSum = 0, fullSum = 0, designSum = 0, cellCount = 0;
+  const warnParts = [];
+  packs.forEach(p => {
+    voltageSum += p.voltageV;
+    currentSum += p.currentA;
+    remainSum += p.remainingCapacityMah;
+    fullSum += p.fullCapacityMah;
+    designSum += p.designCapacityMah;
+    cellCount = (p.cellsMv || []).length;
+    if (p.warnings) warnParts.push('Pack ' + p.index + ': ' + p.warnings);
+  });
+  const voltageV = packs.length > 0 ? voltageSum / packs.length : 0;
+  const socPercent = fullSum > 0 ? (remainSum * 100 / fullSum) : 0;
+  const sohPercent = designSum > 0 ? (fullSum * 100 / designSum) : 0;
+  const nominalVoltage = cellCount > 0 ? 3.2 * cellCount : voltageV;
+  const energyVoltage = Math.min(voltageV, nominalVoltage);
+  const energyKwh = energyVoltage * (remainSum / 1000) / 1000;
+  const fullEnergyKwh = energyVoltage * (fullSum / 1000) / 1000;
+  const powerW = voltageV * currentSum;
+  return { voltageV, currentA: currentSum, socPercent, sohPercent, energyKwh, fullEnergyKwh, powerW,
+           warnings: warnParts.join(' | ') };
+}
+
 async function refresh() {
   try {
     const res = await fetch('/api/data');
@@ -117,8 +145,24 @@ async function refresh() {
       ' | vor ' + Math.round((data.lastUpdateAgoMs || 0) / 1000) + 's';
 
     const packs = data.packs || [];
+    const agg = computeAggregate(packs);
+    const aggCard = packs.length > 0 ? `
+      <div class="pack">
+        <h2>Gesamt</h2>
+        <div class="stats">
+          <div class="stat"><div class="label">Packs</div><div class="value">${packs.length}</div></div>
+          <div class="stat"><div class="label">Bus-Spannung</div><div class="value">${fmt(agg.voltageV,2)} V</div></div>
+          <div class="stat"><div class="label">Strom</div><div class="value">${fmt(agg.currentA,2)} A</div></div>
+          <div class="stat"><div class="label">Leistung</div><div class="value">${fmt(agg.powerW,0)} W</div></div>
+          <div class="stat"><div class="label">SOC</div><div class="value">${fmt(agg.socPercent,1)} %</div></div>
+          <div class="stat"><div class="label">SOH</div><div class="value">${fmt(agg.sohPercent,1)} %</div></div>
+          <div class="stat"><div class="label">Energie (Rest)</div><div class="value">${fmt(agg.energyKwh,2)} kWh</div></div>
+          <div class="stat"><div class="label">Energie (Voll)</div><div class="value">${fmt(agg.fullEnergyKwh,2)} kWh</div></div>
+        </div>
+        ${agg.warnings ? `<div class="warn">${agg.warnings}</div>` : ''}
+      </div>` : '';
 
-    document.getElementById('page-uebersicht').innerHTML = packs.map(p => `
+    document.getElementById('page-uebersicht').innerHTML = aggCard + packs.map(p => `
       <div class="pack">
         <h2>Pack ${p.index}</h2>
         <div class="stats">

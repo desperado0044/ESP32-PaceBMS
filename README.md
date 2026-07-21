@@ -452,7 +452,15 @@ rechts; Web-UI: System-Tab) startet das Gerät auch ohne Update jederzeit neu.
 Nach dem Verbinden läuft ein Webserver auf Port 80 mit Tabs analog zum Display
 (Übersicht/Zellen/Status, aktualisiert alle 5 Sekunden per `GET /api/data`,
 JSON; System per `GET /api/system`) plus dem oben beschriebenen
-**Konfiguration**-Tab. Der **System**-Tab hat zusätzlich einen
+**Konfiguration**-Tab. Der **Übersicht**-Tab zeigt an oberster Stelle eine
+**Gesamt**-Karte im gleichen Format wie die Einzelpack-Karten darunter:
+Anzahl Packs, Bus-Spannung, Strom, Leistung (W), SOC, SOH, sowie Energie
+Rest/Voll (kWh, jeweils die aktuell verfügbare bzw. bei voller Ladung
+verfügbare Gesamtenergie). Bus-Spannung und SOC/SOH sind gemittelt bzw.
+kapazitätsgewichtet über alle Packs (nicht einfach aufaddiert, da Packs
+parallel am selben Bus hängen), Strom/Leistung/Energie dagegen als Summe
+aller Packs — identische Berechnung wie die „Gesamt"-Ansicht des Displays.
+Der **System**-Tab hat zusätzlich einen
 **Kommunikation**-Block: Poll-Intervall, Dauer des letzten Auslesezyklus,
 Fehlversuche in Folge, UART-Parameter, MQTT-Verbindungsstatus, bei Modbus
 zusätzlich Fehlversuche pro Pack-Adresse, sowie Start/Ergebnis-Buttons für
@@ -473,8 +481,12 @@ Schutz-/FET-/Balancing-Status als Binary Sensors. Zusätzlich pro Pack
 (W, Summe aller Packs), `stack_voltage` (V, gemittelt über alle Packs —
 bleibt korrekt, auch wenn einzelne Packs gerade offline/genullt sind),
 `stack_remaining_capacity` und `stack_full_capacity` (jeweils mAh, Summe aller
-Packs mit aktuell gemeldeter Spannung > 0). Broker/Port/User/Passwort werden
-wie oben beschrieben eingerichtet, nicht im Code.
+Packs mit aktuell gemeldeter Spannung > 0). Diese stack-weiten Topics
+summieren/mitteln automatisch über die tatsächlich konfigurierte Pack-Anzahl
+(RS232: vom Master gemeldete Anzahl; Modbus: Anzahl angehakter Adressen) —
+keine feste Pack-Zahl im Code, funktioniert unverändert bei mehr oder weniger
+Packs. Broker/Port/User/Passwort werden wie oben beschrieben eingerichtet,
+nicht im Code.
 
 ## Projektstruktur
 
