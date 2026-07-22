@@ -114,6 +114,9 @@ function fmt(n, d) { return (typeof n === 'number') ? n.toFixed(d) : '-'; }
 function computeAggregate(packs) {
   let voltageSum = 0, currentSum = 0, remainSum = 0, fullSum = 0, designSum = 0, cellCount = 0;
   let onlinePackCount = 0;
+  // exposed on the returned object too, so the "Packs" stat can show "online / total" instead of
+  // just the total slot count (which never shrinks on its own, see README "Pack-Erkennung") -
+  // showing only the raw total looked like a stuck/wrong count once a pack actually disconnected.
   const warnParts = [];
   packs.forEach(p => {
     currentSum += p.currentA;
@@ -128,6 +131,9 @@ function computeAggregate(packs) {
       cellCount = (p.cellsMv || []).length;
     }
     if (p.warnings) warnParts.push('Pack ' + p.index + ': ' + p.warnings);
+    // Surface a failed pack in the Gesamt card too, not just on its own individual card below -
+    // otherwise a dropped pack is invisible unless you scroll down to it specifically.
+    if (p.voltageV <= 0) warnParts.push('Pack ' + p.index + ' ausgefallen');
   });
   const voltageV = onlinePackCount > 0 ? voltageSum / onlinePackCount : 0;
   const socPercent = fullSum > 0 ? (remainSum * 100 / fullSum) : 0;
@@ -138,7 +144,7 @@ function computeAggregate(packs) {
   const fullEnergyKwh = energyVoltage * (fullSum / 1000) / 1000;
   const powerW = voltageV * currentSum;
   return { voltageV, currentA: currentSum, socPercent, sohPercent, energyKwh, fullEnergyKwh, powerW,
-           warnings: warnParts.join(' | ') };
+           onlinePackCount, warnings: warnParts.join(' | ') };
 }
 
 async function refresh() {
@@ -147,7 +153,7 @@ async function refresh() {
     const data = await res.json();
     document.getElementById('meta').textContent =
       (data.valid ? 'verbunden' : 'keine gueltigen Daten') +
-      ' | Vers. ' + (data.bmsVersion || '-') +
+      ' | Vers. (Master) ' + (data.bmsVersion || '-') +
       ' | vor ' + Math.round((data.lastUpdateAgoMs || 0) / 1000) + 's';
 
     const packs = data.packs || [];
@@ -156,7 +162,7 @@ async function refresh() {
       <div class="pack">
         <h2>Gesamt</h2>
         <div class="stats">
-          <div class="stat"><div class="label">Packs</div><div class="value">${packs.length}</div></div>
+          <div class="stat"><div class="label">Packs</div><div class="value">${agg.onlinePackCount} / ${packs.length}</div></div>
           <div class="stat"><div class="label">Bus-Spannung</div><div class="value">${fmt(agg.voltageV,2)} V</div></div>
           <div class="stat"><div class="label">Strom</div><div class="value">${fmt(agg.currentA,2)} A</div></div>
           <div class="stat"><div class="label">Leistung</div><div class="value">${fmt(agg.powerW,0)} W</div></div>
@@ -241,6 +247,7 @@ async function refreshSystem() {
           <div class="stat"><div class="label">Min. freier Speicher</div><div class="value">${Math.round(s.minFreeHeap/1024)} KB</div></div>
           <div class="stat"><div class="label">Freier Update-Speicher</div><div class="value">${Math.round(s.freeSketchSpaceBytes/1024)} KB</div></div>
           <div class="stat"><div class="label">Build</div><div class="value">${s.buildTime}</div></div>
+          <div class="stat"><div class="label">Version</div><div class="value">${s.gitVersion}</div></div>
           <div class="stat"><div class="label">Letzter Neustart</div><div class="value">${s.resetReason}</div></div>
           <div class="stat"><div class="label">BMS-Anschluss</div><div class="value">${s.useModbus ? 'Modbus RTU' : 'RS232'}</div></div>
         </div>
@@ -526,6 +533,11 @@ String buildSystemJson() {
     doc["flashSizeBytes"] = ESP.getFlashChipSize();
     doc["freeSketchSpaceBytes"] = ESP.getFreeSketchSpace();
     doc["buildTime"] = String(__DATE__) + " " + String(__TIME__);
+    // Git tag/commit, auto-updated on every build via get_git_version.py (platformio.ini,
+    // extra_scripts) - unlike buildTime alone, this tells apart "same day, different commit"
+    // builds and reads exactly like the GitHub release tag, so it can never lag behind the
+    // actually-installed firmware the way a manually maintained version string would.
+    doc["gitVersion"] = GIT_VERSION;
     doc["resetReason"] = resetReasonText(esp_reset_reason());
     doc["wifiConnected"] = WiFi.status() == WL_CONNECTED;
     doc["rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;

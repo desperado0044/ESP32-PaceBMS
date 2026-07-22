@@ -241,11 +241,19 @@ bool PaceBmsClient::readWarnInfo(PaceBmsSnapshot& snapshot) {
     size_t infoLen;
     if (!sendAndReceive(kCid2WarnInfo, "FF", info, infoLen)) return false;
 
-    size_t pos = 2;  // leading pack-count field, unused (we iterate snapshot.packCount instead)
+    size_t pos = 2;
     long packsW = PaceBmsProtocol::readHexField(info, infoLen, pos, 2);
-    if (packsW < 0) { lastError_ = "Truncated warning info header"; return false; }
-
-    uint8_t packCount = snapshot.packCount > 0 ? snapshot.packCount : 1;
+    // Must use THIS response's own pack-count field, not snapshot.packCount - the latter never
+    // shrinks (see readAnalogData()'s shrink-handling comment), so once a pack drops out and the
+    // master starts reporting fewer packs, snapshot.packCount would still claim the old, higher
+    // count and this loop would keep trying to parse warning data for a pack that's no longer in
+    // the response at all, running off the end of the buffer ("Truncated cell warning count") on
+    // every single cycle from then on - reproduced on real hardware after a pack disconnected.
+    if (packsW < 0 || packsW > PACE_MAX_PACKS) {
+        lastError_ = "Truncated warning info header";
+        return false;
+    }
+    uint8_t packCount = (uint8_t)packsW;
 
     for (int p = 0; p < packCount && p < PACE_MAX_PACKS; p++) {
         PacePackWarn& warn = snapshot.warn[p];

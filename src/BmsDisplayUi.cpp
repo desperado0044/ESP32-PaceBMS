@@ -362,22 +362,37 @@ void advancePack(int dir, uint8_t packCount) {
     selectedPack = current - 1;
 }
 
+// Any pack currently reporting 0V is treated as "ausgefallen" (failed/disconnected) - same
+// zero-voltage convention already used to exclude a pack from the Gesamt aggregate (display/web/
+// MQTT), so this stays consistent with what "offline" means everywhere else in the firmware.
+bool isPackFailed(const PaceBmsSnapshot& snapshot, uint8_t idx) {
+    return idx < snapshot.packCount && snapshot.packs[idx].packVoltageV <= 0;
+}
+
 void drawPackBar(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
-    String label = selectedPack < 0 || selectedPack >= snapshot.packCount
-                       ? "Gesamt"
-                       : "Pack " + String(snapshot.packAddress[selectedPack]) + " von " +
-                             String(snapshot.packCount);
+    bool aggregate = selectedPack < 0 || selectedPack >= snapshot.packCount;
+    String label = aggregate ? "Gesamt"
+                              : "Pack " + String(snapshot.packAddress[selectedPack]) + " von " +
+                                    String(snapshot.packCount);
+
+    // Currently-viewed pack is down: fill the whole bar red instead of just the text, so it's
+    // obvious even at a glance while swiping through packs, not just readable on close look.
+    bool failed = !aggregate && isPackFailed(snapshot, selectedPack);
+    uint16_t barBg = failed ? COLOR_WARN : COLOR_BG;
+    uint16_t textColor = failed ? COLOR_TEXT : COLOR_TEXT_DIM;
+    if (failed) gfx.fillRect(0, CONTENT_TOP, SCREEN_WIDTH, PACK_BAR_H, barBg);
+
     gfx.setTextDatum(TC_DATUM);
     gfx.setTextFont(1);
-    gfx.setTextColor(COLOR_TEXT_DIM, COLOR_BG);
-    gfx.drawString(label, SCREEN_WIDTH / 2, CONTENT_TOP + 4);
+    gfx.setTextColor(textColor, barBg);
+    gfx.drawString(failed ? label + " - ausgefallen" : label, SCREEN_WIDTH / 2, CONTENT_TOP + 4);
 
     // Small chevrons hinting that this bar (and the page below it) responds to a horizontal swipe.
     int cy = CONTENT_TOP + PACK_BAR_H / 2;
-    gfx.drawLine(SCREEN_WIDTH / 2 - 46, cy - 4, SCREEN_WIDTH / 2 - 50, cy, COLOR_TEXT_DIM);
-    gfx.drawLine(SCREEN_WIDTH / 2 - 50, cy, SCREEN_WIDTH / 2 - 46, cy + 4, COLOR_TEXT_DIM);
-    gfx.drawLine(SCREEN_WIDTH / 2 + 46, cy - 4, SCREEN_WIDTH / 2 + 50, cy, COLOR_TEXT_DIM);
-    gfx.drawLine(SCREEN_WIDTH / 2 + 50, cy, SCREEN_WIDTH / 2 + 46, cy + 4, COLOR_TEXT_DIM);
+    gfx.drawLine(SCREEN_WIDTH / 2 - 46, cy - 4, SCREEN_WIDTH / 2 - 50, cy, textColor);
+    gfx.drawLine(SCREEN_WIDTH / 2 - 50, cy, SCREEN_WIDTH / 2 - 46, cy + 4, textColor);
+    gfx.drawLine(SCREEN_WIDTH / 2 + 46, cy - 4, SCREEN_WIDTH / 2 + 50, cy, textColor);
+    gfx.drawLine(SCREEN_WIDTH / 2 + 50, cy, SCREEN_WIDTH / 2 + 46, cy + 4, textColor);
     gfx.setTextDatum(TL_DATUM);
 }
 
@@ -416,6 +431,12 @@ void drawOverview(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
                 if (warnText.length() > 0) warnText += " | ";
                 warnText += "Pack " + String(snapshot.packAddress[i]) + ": " + snapshot.warn[i].warnings;
             }
+            // Surface a failed pack in the Gesamt banner too, not just when actually swiped to it -
+            // otherwise a dropped pack is invisible unless you happen to swipe through every pack.
+            if (isPackFailed(snapshot, i)) {
+                if (warnText.length() > 0) warnText += " | ";
+                warnText += "Pack " + String(snapshot.packAddress[i]) + " ausgefallen";
+            }
         }
         agg.packVoltageV = onlinePackCount > 0 ? voltageSum / onlinePackCount : 0;
         agg.packCurrentA = currentSum;
@@ -426,7 +447,13 @@ void drawOverview(TFT_eSPI& gfx, const PaceBmsSnapshot& snapshot) {
     }
 
     const PacePackAnalog& pack = aggregate ? agg : snapshot.packs[selectedPack];
-    if (!aggregate) warnText = snapshot.warn[selectedPack].warnings;
+    if (!aggregate) {
+        warnText = snapshot.warn[selectedPack].warnings;
+        if (isPackFailed(snapshot, selectedPack)) {
+            if (warnText.length() > 0) warnText += " | ";
+            warnText += "Pack " + String(snapshot.packAddress[selectedPack]) + " ausgefallen";
+        }
+    }
     // LiFePO4's flat discharge curve makes the measured voltage a good stand-in for the average
     // voltage over the remaining discharge in most of the SOC range - but right after a full
     // charge it briefly overshoots above the nominal per-cell voltage (surface charge), which would
