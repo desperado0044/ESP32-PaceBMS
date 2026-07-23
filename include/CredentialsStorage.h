@@ -12,6 +12,11 @@ public:
 
     String getWifiSsid();
     String getWifiPass();
+    // Fallback WiFi, only ever used once already running normally and the primary network drops
+    // (see WifiProvisioning.cpp) - never tried at boot, and never preferred over the primary once
+    // it's reachable again.
+    String getWifiSsid2();
+    String getWifiPass2();
     String getMqttHost();
     int getMqttPort();
     String getMqttUser();
@@ -23,6 +28,7 @@ public:
     String getHostname();
 
     void saveWifi(const String& ssid, const String& pass);
+    void saveWifi2(const String& ssid, const String& pass);
     void saveMqtt(const String& host, int port, const String& user, const String& pass);
     // Only letters/digits/hyphen/underscore, 1-32 chars, are accepted (this name doubles as an
     // mDNS hostname, OTA Basic-Auth username, and MQTT topic prefix - keeping to that common-

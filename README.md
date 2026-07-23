@@ -423,6 +423,25 @@ Das Portal bricht nie mehr in den Bedienfluss ein: Verbindungsaufbau und Portal
 laufen nicht-blockierend auf dem Netzwerk-Task (siehe Architektur oben), das
 Display bleibt währenddessen normal bedienbar.
 
+**Fallback-WLAN** (optional, eigenes Formular im Konfiguration-Tab): ein
+zweites, rein als Ausweichlösung gedachtes Netz, das **nur im laufenden
+Betrieb** greift, wenn das primäre WLAN ausfällt — nie beim allerersten Boot
+mit noch gar keinen gespeicherten Zugangsdaten. Primäres Netz wird dabei immer
+bevorzugt: läuft das Gerät gerade über Fallback, prüft es alle 5 Minuten kurz
+im Hintergrund, ob das primäre Netz wieder erreichbar ist, und wechselt bei
+Erfolg automatisch zurück. Leer lassen, um kein Fallback-WLAN zu nutzen.
+
+Findet das Gerät weder primäres noch (falls konfiguriert) Fallback-Netz,
+öffnet sich automatisch das Einrichtungsportal — auch wenn das Gerät vorher
+schon lief, nicht nur beim allerersten Boot. Das ist bewusst ungefährlich:
+während das Portal offen ist, versucht das Gerät im Hintergrund alle 5
+Sekunden weiter, sich mit den ursprünglich gespeicherten primären
+Zugangsdaten zu verbinden — kommt das Netz (z.B. nach einem Router-Neustart)
+zwischenzeitlich zurück, verbindet sich das Gerät automatisch und **schließt
+das Portal von selbst**, ganz ohne manuelles Eingreifen. Nur wenn die
+Zugangsdaten wirklich dauerhaft falsch sind, bleibt das Portal offen, bis
+jemand manuell neue einträgt.
+
 ## Bauen & Flashen
 
 1. PlatformIO installieren (CLI oder VS-Code-Extension).

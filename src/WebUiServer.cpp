@@ -373,6 +373,19 @@ const char kConfigHtml[] PROGMEM = R"HTML(
       <button type="submit">WLAN speichern &amp; neu starten</button>
     </fieldset>
   </form>
+  <form method="POST" action="/api/config/wifi2">
+    <fieldset>
+      <legend>Fallback-WLAN</legend>
+      <p style="font-size:0.82rem;color:var(--dim);margin:0 0 0.4rem;">
+        Wird nur genutzt, wenn das Geraet bereits laeuft und das primaere WLAN
+        ausfaellt - nie beim Erststart, nie bevorzugt gegenueber dem primaeren
+        Netz. Leer lassen, um kein Fallback-WLAN zu nutzen.
+      </p>
+      <label>SSID<input type="text" name="ssid" value="%WIFI_SSID2%"></label>
+      <label>Passwort (leer lassen = unveraendert)<input type="password" name="pass" placeholder="unveraendert"></label>
+      <button type="submit">Fallback-WLAN speichern &amp; neu starten</button>
+    </fieldset>
+  </form>
   <form method="POST" action="/api/config/mqtt">
     <fieldset>
       <legend>MQTT</legend>
@@ -591,6 +604,7 @@ void handleReboot(AsyncWebServerRequest* request) {
 void handleConfigPage(AsyncWebServerRequest* request) {
     String html = kConfigHtml;
     html.replace("%WIFI_SSID%", CredentialsManager::instance().getWifiSsid());
+    html.replace("%WIFI_SSID2%", CredentialsManager::instance().getWifiSsid2());
     html.replace("%MQTT_HOST%", CredentialsManager::instance().getMqttHost());
     html.replace("%MQTT_PORT%", String(CredentialsManager::instance().getMqttPort()));
     html.replace("%MQTT_USER%", CredentialsManager::instance().getMqttUser());
@@ -679,6 +693,17 @@ void handleSaveWifi(AsyncWebServerRequest* request) {
     ESP.restart();
 }
 
+void handleSaveWifi2(AsyncWebServerRequest* request) {
+    String ssid = paramOr(request, "ssid", CredentialsManager::instance().getWifiSsid2());
+    String passIn = paramOr(request, "pass", "");
+    String pass = passIn.length() > 0 ? passIn : CredentialsManager::instance().getWifiPass2();
+    CredentialsManager::instance().saveWifi2(ssid, pass);
+
+    request->send(200, "text/html", kConfigSavedHtml);
+    delay(500);
+    ESP.restart();
+}
+
 void handleSaveMqtt(AsyncWebServerRequest* request) {
     String host = paramOr(request, "host", CredentialsManager::instance().getMqttHost());
     int port = paramOr(request, "port", String(CredentialsManager::instance().getMqttPort())).toInt();
@@ -725,6 +750,7 @@ void begin() {
 
     server.on("/konfiguration", HTTP_GET, handleConfigPage);
     server.on("/api/config/wifi", HTTP_POST, handleSaveWifi);
+    server.on("/api/config/wifi2", HTTP_POST, handleSaveWifi2);
     server.on("/api/config/mqtt", HTTP_POST, handleSaveMqtt);
     server.on("/api/config/hostname", HTTP_POST, handleSaveHostname);
     server.on("/api/config/protocol", HTTP_POST, handleSaveProtocol);

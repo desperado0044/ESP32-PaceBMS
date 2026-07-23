@@ -118,4 +118,8 @@ constexpr const char* WIFI_AP_PASSWORD = "";  // open AP; set a password here to
 constexpr uint8_t WIFI_AP_IP_OCTETS[4] = {10, 0, 0, 1};
 constexpr unsigned long WIFI_CONNECT_TIMEOUT_MS = 15000UL;
 constexpr unsigned long WIFI_RECONNECT_CHECK_MS = 5000UL;
+// Once already running and connected via the fallback WiFi, how often to briefly test if the
+// preferred primary network is reachable again (single radio, so this drops the working fallback
+// connection for the duration of the test) - kept infrequent to limit disruption.
+constexpr unsigned long WIFI_PRIMARY_RECOVERY_MS = 300000UL;  // 5 Minuten
 constexpr const char* CREDENTIALS_NVS_NAMESPACE = "pacebms_cred";

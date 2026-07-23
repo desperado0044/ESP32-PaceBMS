@@ -12,6 +12,10 @@ String CredentialsManager::getWifiSsid() { return prefs.getString("wifi_ssid", "
 
 String CredentialsManager::getWifiPass() { return prefs.getString("wifi_pass", ""); }
 
+String CredentialsManager::getWifiSsid2() { return prefs.getString("wifi_ssid2", ""); }
+
+String CredentialsManager::getWifiPass2() { return prefs.getString("wifi_pass2", ""); }
+
 String CredentialsManager::getMqttHost() { return prefs.getString("mqtt_host", MQTT_DEFAULT_HOST); }
 
 int CredentialsManager::getMqttPort() { return prefs.getInt("mqtt_port", MQTT_DEFAULT_PORT); }
@@ -25,6 +29,11 @@ String CredentialsManager::getHostname() { return prefs.getString("hostname", OT
 void CredentialsManager::saveWifi(const String& ssid, const String& pass) {
     prefs.putString("wifi_ssid", ssid);
     prefs.putString("wifi_pass", pass);
+}
+
+void CredentialsManager::saveWifi2(const String& ssid, const String& pass) {
+    prefs.putString("wifi_ssid2", ssid);
+    prefs.putString("wifi_pass2", pass);
 }
 
 void CredentialsManager::saveMqtt(const String& host, int port, const String& user,
