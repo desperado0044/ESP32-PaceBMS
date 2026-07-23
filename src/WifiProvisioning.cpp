@@ -207,7 +207,13 @@ void loop() {
 bool isConnected() { return WiFi.status() == WL_CONNECTED; }
 
 String statusText() {
-    if (WiFi.status() == WL_CONNECTED) return "IP " + WiFi.localIP().toString();
+    // SSID in parentheses names the actual network in use (primary or fallback, see
+    // "Fallback-WLAN" in Konfiguration) - right-aligned in drawTopBar() specifically so a longer
+    // SSID grows away from the device name on the left instead of into it (a centered version of
+    // this overlapped the device name on real hardware).
+    if (WiFi.status() == WL_CONNECTED) {
+        return "IP " + WiFi.localIP().toString() + " (" + WiFi.SSID() + ")";
+    }
     if (state == State::PortalActive) {
         IPAddress apIp(WIFI_AP_IP_OCTETS[0], WIFI_AP_IP_OCTETS[1], WIFI_AP_IP_OCTETS[2],
                         WIFI_AP_IP_OCTETS[3]);

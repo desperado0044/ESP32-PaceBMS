@@ -244,6 +244,8 @@ async function refreshSystem() {
           <div class="stat"><div class="label">Flash</div><div class="value">${Math.round(s.flashSizeBytes/1024/1024)} MB</div></div>
           <div class="stat"><div class="label">IP</div><div class="value">${s.ip}</div></div>
           <div class="stat"><div class="label">MAC</div><div class="value">${s.mac}</div></div>
+          <div class="stat"><div class="label">Verbunden mit</div><div class="value">${s.wifiSsid}</div></div>
+          <div class="stat"><div class="label">AP-MAC</div><div class="value">${s.apBssid}</div></div>
           <div class="stat"><div class="label">Min. freier Speicher</div><div class="value">${Math.round(s.minFreeHeap/1024)} KB</div></div>
           <div class="stat"><div class="label">Freier Update-Speicher</div><div class="value">${Math.round(s.freeSketchSpaceBytes/1024)} KB</div></div>
           <div class="stat"><div class="label">Build</div><div class="value">${s.buildTime}</div></div>
@@ -564,6 +566,11 @@ String buildSystemJson() {
     doc["rssi"] = WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0;
     doc["ip"] = WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : "";
     doc["mac"] = WiFi.macAddress();
+    // Which network is currently in use (primary or fallback WiFi, see "Fallback-WLAN" in
+    // Konfiguration) and the specific access point's own MAC (BSSID) - useful to tell apart
+    // multiple physical APs broadcasting the same SSID (mesh/repeater setups).
+    doc["wifiSsid"] = WiFi.status() == WL_CONNECTED ? WiFi.SSID() : "";
+    doc["apBssid"] = WiFi.status() == WL_CONNECTED ? WiFi.BSSIDstr() : "";
     doc["simulateBmsData"] = RuntimeSettings::simulateBmsData();
     doc["useModbus"] = RuntimeSettings::useModbus();
     const PaceBmsSnapshot& snap = SnapshotStore::get();

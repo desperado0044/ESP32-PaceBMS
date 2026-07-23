@@ -319,10 +319,13 @@ void drawTopBar(TFT_eSPI& gfx) {
     gfx.setTextColor(COLOR_TEXT, COLOR_CARD_ALT);
     gfx.drawString(CredentialsManager::instance().getHostname(), 8, TOP_BAR_H / 2);
 
-    gfx.setTextDatum(TC_DATUM);
+    // Right-aligned, stopping short of the freshness/activity dot's reserved zone (rightmost
+    // FRESH_ZONE_W=24px) instead of centered - centered text could reach far enough left to
+    // overlap the device name for a long enough status string.
+    gfx.setTextDatum(TR_DATUM);
     gfx.setTextFont(1);
     gfx.setTextColor(COLOR_TEXT_DIM, COLOR_CARD_ALT);
-    gfx.drawString(WifiManager::statusText(), SCREEN_WIDTH / 2, 3);
+    gfx.drawString(WifiManager::statusText(), FRESH_ZONE_X - 4, 3);
 
     drawFreshnessIndicator(gfx);
 }
