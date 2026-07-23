@@ -1,6 +1,6 @@
-#include "ModbusSniff.h"
+#include "BusSniff.h"
 
-namespace ModbusSniff {
+namespace BusSniff {
 
 namespace {
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
@@ -52,4 +52,4 @@ String resultText() {
     return out;
 }
 
-}  // namespace ModbusSniff
+}  // namespace BusSniff

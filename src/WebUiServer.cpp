@@ -8,7 +8,7 @@
 #include "CredentialsStorage.h"
 #include "SnapshotStore.h"
 #include "RuntimeSettings.h"
-#include "ModbusSniff.h"
+#include "BusSniff.h"
 #include "BmsActivity.h"
 #include "MqttManager.h"
 
@@ -80,6 +80,7 @@ const char kIndexHtml[] PROGMEM = R"HTML(
   <button data-page="status">Status</button>
   <button data-page="system">System</button>
   <a href="/konfiguration">Konfiguration</a>
+  <a href="/diagnose">Diagnose</a>
 </nav>
 <main>
   <div class="page active" id="page-uebersicht"></div>
@@ -147,14 +148,33 @@ function computeAggregate(packs) {
            onlinePackCount, warnings: warnParts.join(' | ') };
 }
 
+// Self-rescheduling instead of a fixed setInterval: the wait before the next fetch tracks the
+// actual BMS poll interval (data.pollIntervalMs, changeable live via Konfiguration) as an upper
+// bound, so the UI checks in roughly once per real poll cycle instead of a hardcoded cadence that
+// could drift out of sync with it. 1000ms floor is defensive only (the server itself already
+// clamps the saved interval to >=1s) - guards against a missing/zero field, not a realistic value.
+// lastRenderedUpdateMs additionally gates the actual (expensive) page rebuild on whether new data
+// really arrived (data.lastUpdateMs, the BMS client's own absolute "last successful poll" time) -
+// this is what keeps rebuilds tied to genuinely new data even if a fetch happens to land before
+// that cycle's poll finished, or a poll fails outright (lastUpdateMs simply stays unchanged, so
+// stale data never gets pointlessly re-rendered every tick, though "meta"'s freshness text below
+// still updates every fetch regardless, so a stalled BMS is still visibly reflected as "vor Xs"
+// growing/"keine gueltigen Daten").
+let lastRenderedUpdateMs = -1;
+
 async function refresh() {
+  let nextMs = 5000;
   try {
     const res = await fetch('/api/data');
     const data = await res.json();
+    nextMs = Math.max(data.pollIntervalMs || nextMs, 1000);
     document.getElementById('meta').textContent =
       (data.valid ? 'verbunden' : 'keine gueltigen Daten') +
       ' | Vers. (Master) ' + (data.bmsVersion || '-') +
       ' | vor ' + Math.round((data.lastUpdateAgoMs || 0) / 1000) + 's';
+
+    if (data.lastUpdateMs === lastRenderedUpdateMs) return;
+    lastRenderedUpdateMs = data.lastUpdateMs;
 
     const packs = data.packs || [];
     const agg = computeAggregate(packs);
@@ -221,6 +241,8 @@ async function refresh() {
       </div>`).join('') || '<div class="placeholder">Keine Statusdaten</div>';
   } catch (e) {
     document.getElementById('meta').textContent = 'Fehler beim Laden: ' + e;
+  } finally {
+    setTimeout(refresh, nextMs);
   }
 }
 
@@ -269,11 +291,6 @@ async function refreshSystem() {
           <thead><tr style="color:var(--dim);text-align:left;"><th>Adresse</th><th>Fehlversuche in Folge</th></tr></thead>
           <tbody>${s.packFailCount.map(p => `<tr><td>${p.address}</td><td>${p.failCount}</td></tr>`).join('')}</tbody>
         </table>` : ''}
-        <div style="margin-top:0.8rem;">
-          <button id="btn-sniff-start">Bus-Mitschnitt starten (5s)</button>
-          <button id="btn-sniff-result">Ergebnis abrufen</button>
-        </div>
-        <pre id="sniff-result" style="white-space:pre-wrap;word-break:break-all;font-size:0.78rem;margin-top:0.6rem;color:var(--dim);"></pre>
       </div>
       <div class="pack">
         <h2>Simulationsmodus</h2>
@@ -297,22 +314,13 @@ async function refreshSystem() {
       document.getElementById('btn-reboot').textContent = 'Neustart...';
       await fetch('/api/system/reboot', { method: 'POST' });
     });
-    document.getElementById('btn-sniff-start').addEventListener('click', async () => {
-      const res = await fetch('/api/modbus-sniff', { method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body: 'ms=5000' });
-      document.getElementById('sniff-result').textContent = await res.text();
-    });
-    document.getElementById('btn-sniff-result').addEventListener('click', async () => {
-      const res = await fetch('/api/modbus-sniff');
-      document.getElementById('sniff-result').textContent = await res.text();
-    });
   } catch (e) {
     document.getElementById('page-system').innerHTML = '<div class="placeholder">Fehler beim Laden: ' + e + '</div>';
   }
 }
 
-refresh();
+refresh();  // self-reschedules from here on, see its own setTimeout at the end
 refreshSystem();
-setInterval(refresh, 5000);
 setInterval(refreshSystem, 5000);
 </script>
 </body>
@@ -352,6 +360,7 @@ const char kConfigHtml[] PROGMEM = R"HTML(
   <a href="/#status">Status</a>
   <a href="/#system">System</a>
   <a href="/konfiguration" class="active">Konfiguration</a>
+  <a href="/diagnose">Diagnose</a>
 </nav>
 <main>
   <form method="POST" action="/api/config/hostname">
@@ -473,6 +482,106 @@ Sonderzeichen (der Name wird auch als mDNS-Name, OTA-Login und MQTT-Topic-Praefi
 </html>
 )HTML";
 
+// Content is entirely JS-driven from /api/system rather than server-templated placeholders,
+// since the raw hex needs to keep refreshing live while the page is open, same pattern as
+// page-system in the main dashboard.
+const char kDiagnoseHtml[] PROGMEM = R"HTML(
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>%HOSTNAME% - Diagnose</title>
+<style>
+  :root { --bg: #0c0d12; --card: #1a1c24; --card-alt: #14151b; --accent: #00c896; --dim: #8c919f; --divider: #2b2d36; --text: #f0f0f2; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+  header { background: var(--card-alt); padding: 0.75rem 1rem; }
+  header h1 { font-size: 1.1rem; margin: 0; }
+  nav { display: flex; background: var(--card-alt); border-bottom: 1px solid var(--divider); overflow-x: auto; }
+  nav a { flex: 1 0 auto; color: var(--dim); padding: 0.7rem 1rem; font-size: 0.85rem; text-decoration: none; text-align: center; white-space: nowrap; }
+  nav a.active { color: var(--accent); border-bottom: 2px solid var(--accent); }
+  main { padding: 1rem; max-width: 720px; margin: 0 auto; }
+  .pack { border: 1px solid var(--divider); border-radius: 10px; padding: 0.9rem; margin-bottom: 1rem; background: var(--card); }
+  .pack h2 { font-size: 0.95rem; margin: 0 0 0.6rem; color: var(--dim); font-weight: 600; }
+  .pack p.hint { color: var(--dim); font-size: 0.82rem; margin: 0 0 0.6rem; }
+  pre { white-space: pre-wrap; word-break: break-all; font-size: 0.78rem; margin-top: 0.6rem; color: var(--dim); background: var(--card-alt); border-radius: 6px; padding: 0.5rem; }
+  button { padding: 0.6rem 1rem; border: none; border-radius: 6px; background: var(--accent); color: #04231c; font-weight: 600; font-size: 0.85rem; cursor: pointer; }
+  a.back { color: var(--dim); font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<header><h1>%HOSTNAME% - Diagnose</h1></header>
+<nav>
+  <a href="/#uebersicht">Uebersicht</a>
+  <a href="/#system">System</a>
+  <a href="/konfiguration">Konfiguration</a>
+  <a href="/diagnose" class="active">Diagnose</a>
+</nav>
+<main>
+  <div class="pack">
+    <h2>Rohdatenerfassung (RS232)</h2>
+    <p class="hint">
+      Zeigt die rohen Bytes des letzten Polls - separat fuer Analogdaten (Spannung/Kapazitaet) und
+      Warninfo, da beide pro Zyklus einzeln abgefragt werden. Aus Sicherheitsgruenden (Heap-Fragmentierung
+      bei dauerhaftem Betrieb) standardmaessig deaktiviert - hier nur kurz zum Testen einschalten.
+    </p>
+    <button id="btn-raw-toggle">...</button>
+    <div id="raw-data" style="display:none;">
+      <p class="hint" style="margin:0.8rem 0 0;">Analogdaten:</p>
+      <pre id="raw-analog"></pre>
+      <p class="hint" style="margin:0.8rem 0 0;">Warninfo:</p>
+      <pre id="raw-warn"></pre>
+    </div>
+  </div>
+  <div class="pack" id="pack-sniff" style="display:none;">
+    <h2>Bus-Mitschnitt (Modbus/RS485)</h2>
+    <p class="hint">Passiver Mitschnitt des gesamten Busverkehrs, nicht nur unserer eigenen Anfragen.</p>
+    <button id="btn-sniff-start">Bus-Mitschnitt starten (5s)</button>
+    <button id="btn-sniff-result">Ergebnis abrufen</button>
+    <pre id="sniff-result"></pre>
+  </div>
+  <p><a class="back" href="/">&larr; Zurueck zum Dashboard</a></p>
+</main>
+<script>
+async function refreshDiagnose() {
+  try {
+    const res = await fetch('/api/system');
+    const s = await res.json();
+    document.getElementById('pack-sniff').style.display = s.useModbus ? 'block' : 'none';
+    const rawData = document.getElementById('raw-data');
+    const toggleBtn = document.getElementById('btn-raw-toggle');
+    if (!s.useModbus) {
+      toggleBtn.textContent = s.rawCaptureEnabled ? 'Rohdatenerfassung deaktivieren' : 'Rohdatenerfassung aktivieren';
+      toggleBtn.style.display = '';
+      rawData.style.display = s.rawCaptureEnabled ? 'block' : 'none';
+      document.getElementById('raw-analog').textContent = s.lastAnalogRawHex || '(keine)';
+      document.getElementById('raw-warn').textContent = s.lastRawHex || '(keine)';
+    } else {
+      toggleBtn.style.display = 'none';
+      rawData.style.display = 'none';
+    }
+  } catch (e) { /* keep last known state on a transient fetch error */ }
+}
+document.getElementById('btn-raw-toggle').addEventListener('click', async () => {
+  await fetch('/api/system/raw-capture', { method: 'POST' });
+  refreshDiagnose();
+});
+document.getElementById('btn-sniff-start').addEventListener('click', async () => {
+  const res = await fetch('/api/bus-sniff', { method: 'POST', headers: {'Content-Type':'application/x-www-form-urlencoded'}, body: 'ms=5000' });
+  document.getElementById('sniff-result').textContent = await res.text();
+});
+document.getElementById('btn-sniff-result').addEventListener('click', async () => {
+  const res = await fetch('/api/bus-sniff');
+  document.getElementById('sniff-result').textContent = await res.text();
+});
+refreshDiagnose();
+setInterval(refreshDiagnose, 3000);
+</script>
+</body>
+</html>
+)HTML";
+
 String paramOr(AsyncWebServerRequest* request, const char* name, const String& fallback) {
     return request->hasParam(name, true) ? request->getParam(name, true)->value() : fallback;
 }
@@ -483,6 +592,10 @@ String buildJson() {
 
     doc["valid"] = s.valid;
     doc["lastUpdateAgoMs"] = s.valid ? (millis() - s.lastUpdateMs) : 0;
+    // Absolute timestamp (not the relative lastUpdateAgoMs above), so the web UI can tell whether
+    // a genuinely new poll landed since its last render, instead of just how long ago that was -
+    // see refresh()'s lastRenderedUpdateMs check.
+    doc["lastUpdateMs"] = s.lastUpdateMs;
     doc["bmsVersion"] = s.bmsVersion;
     doc["bmsSerial"] = s.bmsSerial;
     doc["packSerial"] = s.packSerial;
@@ -524,6 +637,11 @@ String buildJson() {
     capacity["designCapacityMah"] = s.capacity.designCapacityMah;
     capacity["socPercent"] = s.capacity.socPercent;
     capacity["sohPercent"] = s.capacity.sohPercent;
+
+    // So the web UI's own refresh cadence can track the actual poll interval (see refresh() in
+    // kIndexHtml) instead of a hardcoded value that drifts out of sync once someone changes it
+    // via Konfiguration.
+    doc["pollIntervalMs"] = RuntimeSettings::bmsPollIntervalMs();
 
     String out;
     serializeJson(doc, out);
@@ -575,6 +693,9 @@ String buildSystemJson() {
     doc["useModbus"] = RuntimeSettings::useModbus();
     const PaceBmsSnapshot& snap = SnapshotStore::get();
     doc["lastPollError"] = snap.lastPollError;
+    doc["lastRawHex"] = snap.lastRawHex;
+    doc["lastAnalogRawHex"] = snap.lastAnalogRawHex;
+    doc["rawCaptureEnabled"] = RuntimeSettings::rawCaptureEnabled();
     doc["lastRequestMs"] = BmsActivity::lastRequestMs();
     doc["lastResponseMs"] = BmsActivity::lastResponseMs();
     doc["pollIntervalMs"] = RuntimeSettings::bmsPollIntervalMs();
@@ -606,6 +727,20 @@ void handleReboot(AsyncWebServerRequest* request) {
     request->send(200, "text/plain", "Neustart...");
     delay(300);
     ESP.restart();
+}
+
+void handleDiagnosePage(AsyncWebServerRequest* request) {
+    String html = kDiagnoseHtml;
+    html.replace("%HOSTNAME%", CredentialsManager::instance().getHostname());
+    request->send(200, "text/html", html);
+}
+
+// Unlike handleToggleSimulate, no reboot needed - NetworkTask re-reads this every loop iteration
+// (same "no restart" pattern as bmsPollIntervalMs), so it takes effect on the very next poll.
+void handleToggleRawCapture(AsyncWebServerRequest* request) {
+    bool newValue = !RuntimeSettings::rawCaptureEnabled();
+    RuntimeSettings::setRawCaptureEnabled(newValue);
+    request->send(200, "text/plain", newValue ? "an" : "aus");
 }
 
 void handleConfigPage(AsyncWebServerRequest* request) {
@@ -654,26 +789,27 @@ void handleSavePollInterval(AsyncWebServerRequest* request) {
     request->redirect("/konfiguration");
 }
 
-// One-off diagnostic: passively listens on the Modbus/RS485 UART (no transmit at all) and returns
-// whatever raw bytes show up as hex - answers "is there any traffic on this bus at all, from
-// anything" independent of our own protocol code, useful when our own reads time out and it's
-// unclear whether that's a wiring/hardware issue or something in our request/response handling.
-// The actual byte collection happens in NetworkTask's own loop (ModbusSniff::collectIfActive) -
-// this handler only starts the capture and, separately, reads back whatever's been collected so
-// far. An earlier version collected bytes directly in this handler via a several-second blocking
-// loop, which starved the AsyncTCP task long enough to trip the watchdog and reboot the board.
-void handleModbusSniffStart(AsyncWebServerRequest* request) {
+// One-off diagnostic: passively listens on whichever UART the active transport uses (RS232 or
+// Modbus/RS485, see BusSniff.h) and returns whatever raw bytes show up as hex - answers "is there
+// any traffic on this bus at all, from anything" independent of our own protocol code, useful when
+// our own reads time out and it's unclear whether that's a wiring/hardware issue or something in
+// our request/response handling. The actual byte collection happens in NetworkTask's own loop
+// (BusSniff::collectIfActive) - this handler only starts the capture and, separately, reads back
+// whatever's been collected so far. An earlier version collected bytes directly in this handler via
+// a several-second blocking loop, which starved the AsyncTCP task long enough to trip the watchdog
+// and reboot the board.
+void handleBusSniffStart(AsyncWebServerRequest* request) {
     int durationMs = paramOr(request, "ms", "5000").toInt();
     if (durationMs < 200) durationMs = 200;
     if (durationMs > 20000) durationMs = 20000;
-    ModbusSniff::start((unsigned long)durationMs);
+    BusSniff::start((unsigned long)durationMs);
     request->send(200, "text/plain",
                   "Mitschnitt gestartet (" + String(durationMs) +
                       "ms) - Ergebnis per GET auf denselben Pfad abrufen.");
 }
 
-void handleModbusSniffResult(AsyncWebServerRequest* request) {
-    request->send(200, "text/plain", ModbusSniff::resultText());
+void handleBusSniffResult(AsyncWebServerRequest* request) {
+    request->send(200, "text/plain", BusSniff::resultText());
 }
 
 void handleSaveModbusPacks(AsyncWebServerRequest* request) {
@@ -754,6 +890,9 @@ void begin() {
     });
     server.on("/api/system/simulate", HTTP_POST, handleToggleSimulate);
     server.on("/api/system/reboot", HTTP_POST, handleReboot);
+    server.on("/api/system/raw-capture", HTTP_POST, handleToggleRawCapture);
+
+    server.on("/diagnose", HTTP_GET, handleDiagnosePage);
 
     server.on("/konfiguration", HTTP_GET, handleConfigPage);
     server.on("/api/config/wifi", HTTP_POST, handleSaveWifi);
@@ -762,8 +901,8 @@ void begin() {
     server.on("/api/config/hostname", HTTP_POST, handleSaveHostname);
     server.on("/api/config/protocol", HTTP_POST, handleSaveProtocol);
     server.on("/api/config/poll-interval", HTTP_POST, handleSavePollInterval);
-    server.on("/api/modbus-sniff", HTTP_POST, handleModbusSniffStart);
-    server.on("/api/modbus-sniff", HTTP_GET, handleModbusSniffResult);
+    server.on("/api/bus-sniff", HTTP_POST, handleBusSniffStart);
+    server.on("/api/bus-sniff", HTTP_GET, handleBusSniffResult);
     server.on("/api/config/modbus-packs", HTTP_POST, handleSaveModbusPacks);
 
     ElegantOTA.begin(&server);

@@ -29,4 +29,8 @@ unsigned long bmsPollIntervalMs() { return prefs.getULong("poll_ms", BMS_POLL_IN
 
 void setBmsPollIntervalMs(unsigned long ms) { prefs.putULong("poll_ms", ms); }
 
+bool rawCaptureEnabled() { return prefs.getBool("raw_cap", false); }
+
+void setRawCaptureEnabled(bool value) { prefs.putBool("raw_cap", value); }
+
 }  // namespace RuntimeSettings

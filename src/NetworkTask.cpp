@@ -11,7 +11,7 @@
 #include "SimulatedBms.h"
 #include "RuntimeSettings.h"
 #include "BmsActivity.h"
-#include "ModbusSniff.h"
+#include "BusSniff.h"
 #include "CredentialsStorage.h"
 
 namespace NetworkTask {
@@ -49,13 +49,19 @@ void taskEntry(void* /*pvParameters*/) {
             WebUiServer::loop();
         }
 
-        ModbusSniff::collectIfActive(Serial1);
+        // Modbus/RS485 only: a shared bus has other devices' traffic to passively capture. RS232
+        // is a direct point-to-point link with no independent traffic source at all (see
+        // BmsData::lastRawHex for the RS232 equivalent - the last poll's own raw bytes instead).
+        bool useModbus = RuntimeSettings::useModbus();
+        if (useModbus) BusSniff::collectIfActive(Serial1);
 
         unsigned long now = millis();
-        if (!ModbusSniff::active() && now - lastPollMs >= RuntimeSettings::bmsPollIntervalMs()) {
+        // While sniffing, polling is paused so the capture shows genuinely passive bus traffic
+        // (other devices on the shared bus), not just our own request/response.
+        bool pausedForSniff = BusSniff::active();
+        if (!pausedForSniff && now - lastPollMs >= RuntimeSettings::bmsPollIntervalMs()) {
             lastPollMs = now;
             BmsActivity::markRequestSent();
-            bool useModbus = RuntimeSettings::useModbus();
             bool pollOk;
             String pollErr;
             if (RuntimeSettings::simulateBmsData()) {
@@ -67,8 +73,11 @@ void taskEntry(void* /*pvParameters*/) {
                 memcpy(workingSnapshot.packFailCount, modbusClient.failCounts(),
                        sizeof(workingSnapshot.packFailCount));
             } else {
+                bmsClient.setRawCaptureEnabled(RuntimeSettings::rawCaptureEnabled());
                 pollOk = bmsClient.poll(workingSnapshot);
                 pollErr = bmsClient.lastError();
+                workingSnapshot.lastRawHex = bmsClient.lastRawHex();
+                workingSnapshot.lastAnalogRawHex = bmsClient.lastAnalogRawHex();
             }
             // Stashed regardless of pollOk - Modbus in particular can report overall success (at
             // least one configured address answered) while still having something to report for

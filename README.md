@@ -469,9 +469,15 @@ Update jederzeit neu.
 ## Web-Oberfläche
 
 Nach dem Verbinden läuft ein Webserver auf Port 80 mit Tabs analog zum Display
-(Übersicht/Zellen/Status, aktualisiert alle 5 Sekunden per `GET /api/data`,
-JSON; System per `GET /api/system`) plus dem oben beschriebenen
-**Konfiguration**-Tab. Der **Übersicht**-Tab zeigt an oberster Stelle eine
+(Übersicht/Zellen/Status per `GET /api/data`, JSON; System per
+`GET /api/system`) plus dem oben beschriebenen **Konfiguration**-Tab.
+Übersicht/Zellen/Status fragen dabei nicht stur alle 5 Sekunden ab, sondern
+richten sich nach dem tatsächlich eingestellten Poll-Intervall (siehe
+"Abfrageintervall" in der Konfiguration) und bauen die Seite auch nur dann
+neu auf, wenn seit dem letzten Aufruf wirklich ein neuer BMS-Poll
+abgeschlossen wurde — bleiben Daten aus, wird nur die Frische-Anzeige
+("vor Xs") weiter aktualisiert, kein unnötiger Rebuild. Der **Übersicht**-Tab
+zeigt an oberster Stelle eine
 **Gesamt**-Karte im gleichen Format wie die Einzelpack-Karten darunter:
 Anzahl Packs, Bus-Spannung, Strom, Leistung (W), SOC, SOH, sowie Energie
 Rest/Voll (kWh, jeweils die aktuell verfügbare bzw. bei voller Ladung
@@ -482,9 +488,22 @@ aller Packs — identische Berechnung wie die „Gesamt"-Ansicht des Displays.
 Der **System**-Tab hat zusätzlich einen
 **Kommunikation**-Block: Poll-Intervall, Dauer des letzten Auslesezyklus,
 Fehlversuche in Folge, UART-Parameter, MQTT-Verbindungsstatus, bei Modbus
-zusätzlich Fehlversuche pro Pack-Adresse, sowie Start/Ergebnis-Buttons für
-einen passiven Bus-Mitschnitt (`/api/modbus-sniff`) — nützlich zum Debuggen
-der RS485-Verkabelung ohne USB/Serial-Zugriff.
+zusätzlich Fehlversuche pro Pack-Adresse.
+
+Für tiefergehende Fehlersuche an der Bus-Verkabelung gibt es zusätzlich einen
+eigenen **Diagnose**-Tab (`/diagnose`), rechts neben Konfiguration in der
+Navigation. Inhalt je nach eingestelltem BMS-Anschluss:
+- **Modbus/RS485**: Start/Ergebnis-Buttons für einen passiven Bus-Mitschnitt
+  (`/api/bus-sniff`) — zeigt den gesamten Busverkehr, nicht nur die eigenen
+  Anfragen, nützlich zum Debuggen der Verkabelung ohne USB/Serial-Zugriff.
+- **RS232**: da hier (anders als beim gemeinsam genutzten Modbus-Bus) kein
+  unabhängiger Fremdverkehr existiert, gibt es stattdessen die rohen Bytes
+  des letzten Polls — getrennt für Analogdaten (Spannung/Kapazität) und
+  Warninfo, da beide pro Zyklus einzeln abgefragt werden. Per Schalter
+  ein-/ausschaltbar, **standardmäßig deaktiviert**: der Hex-Dump wird bei
+  jedem Poll-Zyklus per String-Konkatenation neu aufgebaut, was auf einem
+  Dauerbetriebsgerät unnötige Heap-Fragmentierung verursachen würde — daher
+  nur zum gezielten Testen kurz einschalten.
 
 ## MQTT / Home Assistant
 

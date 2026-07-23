@@ -44,7 +44,7 @@ bool PaceBmsClient::readFrame(uint8_t* buf, size_t cap, size_t& outLen) {
     // Diagnostic only: every byte actually seen on the wire, including anything before SOI is
     // found (which the real parse below discards without ever recording) - so a timeout can report
     // exactly what (if anything) arrived, over the network, without a USB/serial connection.
-    constexpr size_t kRawCap = 64;
+    constexpr size_t kRawCap = kResponseBufCap;
     uint8_t raw[kRawCap];
     size_t rawLen = 0;
 
@@ -58,11 +58,13 @@ bool PaceBmsClient::readFrame(uint8_t* buf, size_t cap, size_t& outLen) {
             }
             if (len >= cap) {
                 lastError_ = "Response frame exceeds buffer size";
+                updateLastRawHex(raw, rawLen);
                 return false;
             }
             buf[len++] = (uint8_t)c;
             if (c == (int)PaceBmsProtocol::EOI) {
                 outLen = len;
+                updateLastRawHex(raw, rawLen);
                 return true;
             }
         }
@@ -74,7 +76,18 @@ bool PaceBmsClient::readFrame(uint8_t* buf, size_t cap, size_t& outLen) {
         lastError_ += b;
     }
     lastError_ += ")";
+    updateLastRawHex(raw, rawLen);
     return false;
+}
+
+void PaceBmsClient::updateLastRawHex(const uint8_t* raw, size_t rawLen) {
+    lastRawHex_ = "";
+    if (!rawCaptureEnabled_) return;
+    for (size_t i = 0; i < rawLen; i++) {
+        char b[4];
+        snprintf(b, sizeof(b), "%02X ", raw[i]);
+        lastRawHex_ += b;
+    }
 }
 
 bool PaceBmsClient::sendAndReceive(const char* cid2, const char* infoAscii,
@@ -132,7 +145,10 @@ bool PaceBmsClient::readSerials(String& outBmsSerial, String& outPackSerial) {
 bool PaceBmsClient::readAnalogData(PaceBmsSnapshot& snapshot) {
     const uint8_t* info;
     size_t infoLen;
-    if (!sendAndReceive(kCid2PackAnalogData, "FF", info, infoLen)) return false;
+    bool sent = sendAndReceive(kCid2PackAnalogData, "FF", info, infoLen);
+    // Stashed before readWarnInfo()'s own call overwrites lastRawHex_ - see lastAnalogRawHex().
+    lastAnalogRawHex_ = lastRawHex_;
+    if (!sent) return false;
 
     size_t pos = 2;  // upstream skips 2 leading chars before the pack count
     long packs = PaceBmsProtocol::readHexField(info, infoLen, pos, 2);

@@ -32,4 +32,13 @@ void setModbusPackAddressMask(uint16_t mask);
 unsigned long bmsPollIntervalMs();
 void setBmsPollIntervalMs(unsigned long ms);
 
+// RS232 only: whether PaceBmsClient builds the "last raw poll bytes" hex dump shown on the web
+// UI's Diagnose page (see PaceBmsClient::lastRawHex()/lastAnalogRawHex()). Off by default - the
+// hex string is rebuilt via repeated heap-allocating String concatenation on every single poll
+// cycle, which is fine to enable temporarily while actually looking at the Diagnose page but not
+// worth paying continuously (heap fragmentation risk on a device that otherwise runs for weeks).
+// Re-read every loop iteration like bmsPollIntervalMs - no reboot needed to flip it.
+bool rawCaptureEnabled();
+void setRawCaptureEnabled(bool value);
+
 }  // namespace RuntimeSettings

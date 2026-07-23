@@ -68,6 +68,16 @@ struct PaceBmsSnapshot {
     // most recent attempt had nothing to report.
     String lastPollError;
 
+    // RS232 only: raw bytes seen during the most recent poll (success or failure), as a hex
+    // string - Modbus already gets a genuine passive bus-sniff (see BusSniff), but RS232 is a
+    // direct point-to-point link with no independent traffic to sniff, so this is the only way to
+    // see "what did the BMS just send" over the network. Stays empty for Modbus/simulation, and
+    // also empty while RuntimeSettings::rawCaptureEnabled() is off (the default). poll() requests
+    // warn info last each cycle, so this ends up holding that response specifically - see
+    // lastAnalogRawHex below for the other (and, for the SOC/voltage data, more interesting) one.
+    String lastRawHex;
+    String lastAnalogRawHex;
+
     // Communication diagnostics, all surfaced via /api/system's "Kommunikation" section.
     int consecutiveFailures = 0;
     // Only meaningful for Modbus (indexed like packAddress[]/packs[] - position in the configured
