@@ -20,6 +20,18 @@ bool everConnected = false;
 // initial boot connection in begin() only ever tries primary, unchanged for now.
 bool usingSecondary = false;
 
+// WiFiManager's own HTTP server can still be mid-response to the portal's own form-submission
+// POST (the browser's "Gespeichert, verbinde..." page) right at the instant WL_CONNECTED first
+// becomes true - calling stopConfigPortal() at that exact moment tore the server down mid-request
+// and crashed (Guru Meditation / null-pointer inside WiFiManager::shutdownConfigPortal()'s
+// server->handleClient() call), reproduced reliably on real hardware during first-time setup.
+// Waiting a short grace period - during which wm.process() keeps running completely normally -
+// before actually tearing the portal down avoids this; the delay is imperceptible to the user
+// (they're already looking at the browser's own "connecting" page at this point).
+constexpr unsigned long PORTAL_CONNECT_GRACE_MS = 2000;
+unsigned long portalConnectDetectedMs = 0;
+bool portalConnectPending = false;
+
 ::WiFiManager wm;
 // WiFiManagerParameter keeps its own internal copy of the value, but the objects themselves must
 // stay alive for as long as wm.process() might still reference them - i.e. for the whole time the
@@ -46,6 +58,7 @@ void beginConnect(bool secondary) {
 }
 
 void startPortal() {
+    portalConnectPending = false;  // fresh portal session, no stale grace-period state from before
     IPAddress apIp(WIFI_AP_IP_OCTETS[0], WIFI_AP_IP_OCTETS[1], WIFI_AP_IP_OCTETS[2],
                     WIFI_AP_IP_OCTETS[3]);
     Serial.printf("WiFi: opening setup portal '%s' at %s\n", WIFI_AP_NAME, apIp.toString().c_str());
@@ -129,7 +142,21 @@ void begin() {
 
 void loop() {
     if (WiFi.status() == WL_CONNECTED) {
-        if (state == State::PortalActive) onPortalConnected();
+        if (state == State::PortalActive) {
+            if (!portalConnectPending) {
+                portalConnectPending = true;
+                portalConnectDetectedMs = millis();
+            }
+            if (millis() - portalConnectDetectedMs < PORTAL_CONNECT_GRACE_MS) {
+                // Still within the grace window - keep the portal's own HTTP/DNS handling
+                // running completely normally, don't tear anything down yet (see
+                // PORTAL_CONNECT_GRACE_MS above for why).
+                wm.process();
+                return;
+            }
+            portalConnectPending = false;
+            onPortalConnected();
+        }
         if (!everConnected) {
             Serial.printf("WiFi: connected, IP %s (%s)\n", WiFi.localIP().toString().c_str(),
                           usingSecondary ? "Fallback" : "primaer");
