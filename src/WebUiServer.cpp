@@ -419,6 +419,14 @@ const char kConfigHtml[] PROGMEM = R"HTML(
       <button type="submit">Adressen speichern &amp; neu starten</button>
     </fieldset>
   </form>
+  <fieldset>
+    <legend>Firmware-Update</legend>
+    <p style="font-size:0.82rem;color:var(--dim);margin:0 0 0.4rem;">
+      Anmeldung mit Geraetename (%HOSTNAME%) als Benutzername und dem in
+      <code>include/Config.h</code> hinterlegten OTA-Passwort.
+    </p>
+    <a href="/update">Zur Update-Seite</a>
+  </fieldset>
   <p><a class="back" href="/">&larr; Zurueck zum Dashboard</a></p>
 </main>
 </body>

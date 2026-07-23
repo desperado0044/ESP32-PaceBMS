@@ -46,8 +46,6 @@ wenn das an keinem dieser Geräte selbst getestet wurde:
 
 - Katbatt 6.4kWh LiFePO4 (PACE BMS P16S200A)
 - Gobel Power GP-SR1-LF280-RN150 51.2V 280Ah (PACE BMS S16A150)
-- Joyvoit Suns Energy Battery JVBW5KW (PACE BMS P16S100A)
-- Orient Power Wall Mounted Battery 48V100AH
 - SOK 100Ah 48V Server Rack Berry (PACE BMS P16S100A)
 - MeritSun / i-finity LFP 200 - 48V
 - Revov R100 51.2V 100Ah
@@ -135,17 +133,17 @@ RS485" weiter unten für die tatsächlich nötige Mehrpack-Verkabelung.
 
 ### Display + Touch (TFT_eSPI + XPT2046)
 
-Getrennte SPI-Busse wie im Haustürklingel-Projekt: Display auf HSPI (TFT_eSPI-eigene
-Instanz), Touch auf VSPI (globales Arduino-`SPI`-Objekt, `XPT2046_Touchscreen`
-erlaubt keine eigene Instanz). Konfiguration läuft komplett über `build_flags` in
-`platformio.ini` (keine `User_Setup.h`-Änderungen nötig).
+Getrennte SPI-Busse: Display auf HSPI (TFT_eSPI-eigene Instanz), Touch auf VSPI
+(globales Arduino-`SPI`-Objekt, `XPT2046_Touchscreen` erlaubt keine eigene
+Instanz). Konfiguration läuft komplett über `build_flags` in `platformio.ini`
+(keine `User_Setup.h`-Änderungen nötig).
 
 | Signal | Pin | Bus |
 |---|---|---|
 | TFT_SCLK | 14 | HSPI (nativ) |
 | TFT_MOSI | 4 | GPIO-Matrix |
 | TFT_CS | 17 | GPIO |
-| TFT_DC | 21 | GPIO |
+| TFT_DC | 13 | GPIO |
 | TFT_RST | 16 | GPIO |
 | Backlight (PWM) | 22 | GPIO (ledc) |
 | TOUCH_SCLK | 18 | VSPI (nativ) |
@@ -442,10 +440,12 @@ Das Gerät ist per mDNS auch unter `http://<OTA_HOSTNAME>.local` erreichbar
 
 Für spätere Updates steht danach auch OTA über
 [ElegantOTA](https://github.com/ayushsharma82/ElegantOTA) bereit:
-`http://<ip-oder-hostname>/update` (HTTP-Basic-Auth, siehe `OTA_HOSTNAME`/
-`OTA_PASSWORD` in `include/Config.h` — vor einem echten Einsatz das
-Standardpasswort ändern). Ein Neustart-Button (Display: System-Tab, oben
-rechts; Web-UI: System-Tab) startet das Gerät auch ohne Update jederzeit neu.
+`http://<ip-oder-hostname>/update` (HTTP-Basic-Auth mit dem Gerätenamen als
+Benutzername, siehe `OTA_PASSWORD` in `include/Config.h` — vor einem echten
+Einsatz das Standardpasswort ändern), auch direkt verlinkt im
+**Konfiguration**-Tab der Weboberfläche. Ein Neustart-Button (Display:
+System-Tab, oben rechts; Web-UI: System-Tab) startet das Gerät auch ohne
+Update jederzeit neu.
 
 ## Web-Oberfläche
 
