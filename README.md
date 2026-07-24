@@ -93,13 +93,21 @@ echter Hardware bestätigt (PACE P16S100A). Die genaue RJ11-Belegung kann je
 nach Marke/Modell trotzdem abweichen — vor dem Anschließen mit einem
 Multimeter/Oszilloskop verifizieren.
 
-**Das Pack am RS232-Port muss per Dip-Schalter auf Adresse 1 stehen.** Laut
-offiziellem PACE-RS232-Protokolldokument gilt Adresse 1 als Master-Rolle im
-Master-Slave-Verbund: nur ein Pack mit Adresse 1 aggregiert und meldet die
-Daten aller Packs im Stack; jedes anders adressierte Pack antwortet nur für
-sich allein. Diese Firmware sendet immer ADR=1 (fest, nicht konfigurierbar,
-wie auch im Python-Referenzprojekt) — steht das physische Master-Pack auf
-einer anderen Adresse, bleibt die RS232-Antwort aus oder unvollständig.
+**Für die Mehr-Pack-Aggregation muss das Pack am RS232-Port per Dip-Schalter
+auf Adresse 1 stehen — für den Anschluss eines einzelnen Packs ist das nicht
+nötig.** Laut offiziellem PACE-RS232-Protokolldokument gilt Adresse 1 als
+Master-Rolle im Master-Slave-Verbund: nur ein Pack mit Adresse 1 aggregiert
+und meldet die Daten aller Packs im Stack; jedes anders adressierte Pack
+antwortet nur für sich allein. Diese Firmware sendet immer ADR=1 (fest, nicht
+konfigurierbar, wie auch im Python-Referenzprojekt) — real getestet bestätigt:
+das Adressfeld in der Anfrage muss dabei **nicht** mit der tatsächlich am Pack
+eingestellten Dip-Schalter-Adresse übereinstimmen, damit es antwortet (RS232
+ist eine reine Punkt-zu-Punkt-Verbindung, es hängt nur ein Gerät an der
+Leitung — die Adresse im Anfrage-Frame wird hier nicht geprüft). Ein einzelnes
+Pack liefert also unabhängig von seiner eigenen Dip-Schalter-Adresse Daten;
+nur wenn mehrere Packs im echten Master-Slave-Verbund als Stack aggregiert
+werden sollen, muss das am RS232-Port angeschlossene Pack speziell auf
+Adresse 1 stehen.
 
 ### Modbus RTU / RS485 (alternativer Anschluss, UART1)
 
